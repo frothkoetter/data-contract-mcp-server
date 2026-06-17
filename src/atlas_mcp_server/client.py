@@ -38,7 +38,9 @@ class AtlasClient:
         self.session = session
         self.timeout = timeout_seconds
 
-    def _url(self, path: str) -> str:
+    def _url(self, path: str, *, v2: bool = True) -> str:
+        if v2:
+            return f"{self.base_url}/v2/{path.lstrip('/')}"
         return f"{self.base_url}/{path.lstrip('/')}"
 
     @retry(
@@ -47,8 +49,8 @@ class AtlasClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
-    def _get(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        resp = self.session.get(self._url(path), params=params, timeout=self.timeout)
+    def _get(self, path: str, params: Optional[Dict[str, Any]] = None, *, v2: bool = True) -> Any:
+        resp = self.session.get(self._url(path, v2=v2), params=params, timeout=self.timeout)
         if not resp.ok:
             raise AtlasError(f"GET {path} failed: {resp.reason}", resp.status_code, resp.text or "(empty)")
         return resp.json()
@@ -59,8 +61,8 @@ class AtlasClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
-    def _post(self, path: str, data: Any) -> Any:
-        resp = self.session.post(self._url(path), json=data, timeout=self.timeout)
+    def _post(self, path: str, data: Any, *, v2: bool = True) -> Any:
+        resp = self.session.post(self._url(path, v2=v2), json=data, timeout=self.timeout)
         if not resp.ok:
             raise AtlasError(f"POST {path} failed: {resp.reason}", resp.status_code, resp.text or "(empty)")
         return resp.json() if resp.content else {}
@@ -71,8 +73,8 @@ class AtlasClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
-    def _put(self, path: str, data: Any) -> Any:
-        resp = self.session.put(self._url(path), json=data, timeout=self.timeout)
+    def _put(self, path: str, data: Any, *, v2: bool = True) -> Any:
+        resp = self.session.put(self._url(path, v2=v2), json=data, timeout=self.timeout)
         if not resp.ok:
             raise AtlasError(f"PUT {path} failed: {resp.reason}", resp.status_code, resp.text or "(empty)")
         return resp.json() if resp.content else {}
@@ -83,8 +85,8 @@ class AtlasClient:
         stop=stop_after_attempt(3),
         reraise=True,
     )
-    def _delete(self, path: str, params: Optional[Dict[str, Any]] = None) -> Any:
-        resp = self.session.delete(self._url(path), params=params, timeout=self.timeout)
+    def _delete(self, path: str, params: Optional[Dict[str, Any]] = None, *, v2: bool = True) -> Any:
+        resp = self.session.delete(self._url(path, v2=v2), params=params, timeout=self.timeout)
         if not resp.ok:
             raise AtlasError(f"DELETE {path} failed: {resp.reason}", resp.status_code, resp.text or "(empty)")
         return resp.json() if resp.content else {}
@@ -92,13 +94,13 @@ class AtlasClient:
     # ── Admin ──────────────────────────────────────────────────────────────
 
     def get_status(self) -> Dict[str, Any]:
-        return self._get("admin/status")
+        return self._get("admin/status", v2=False)
 
     def get_metrics(self) -> Dict[str, Any]:
-        return self._get("admin/metrics")
+        return self._get("admin/metrics", v2=False)
 
     def get_version(self) -> Dict[str, Any]:
-        return self._get("admin/version")
+        return self._get("admin/version", v2=False)
 
     # ── Search ─────────────────────────────────────────────────────────────
 
@@ -248,7 +250,7 @@ class AtlasClient:
         return self._post("types/typedefs", typedef_payload)
 
     def purge_entities(self, guids: List[str]) -> Any:
-        return self._put("admin/purge/", guids)
+        return self._put("admin/purge/", guids, v2=False)
 
     def delete_entity_permanently(
         self,
@@ -405,6 +407,30 @@ class AtlasClient:
             exclude_deleted=exclude_deleted,
         )
 
+    def _data_contract_base_attributes(
+        self,
+        qualified_name: str,
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        try:
+            existing = self.get_entity_by_attribute(
+                DATA_CONTRACT_TYPE, "qualifiedName", qualified_name
+            )
+            attrs = existing["entity"]["attributes"]
+            return {
+                "qualifiedName": qualified_name,
+                "contractId": attrs["contractId"],
+                "version": attrs["version"],
+                "status": attrs["status"],
+            }
+        except AtlasError:
+            return {
+                "qualifiedName": qualified_name,
+                "contractId": _require(contract_id, "contract_id"),
+                "version": _require(version, "version"),
+            }
+
     def create_data_contract(
         self,
         contract_id: str,
@@ -443,12 +469,11 @@ class AtlasClient:
             _require(contract_id, "contract_id"),
             _require(version, "version"),
         )
+        attributes = self._data_contract_base_attributes(qn, contract_id, version)
+        attributes["status"] = status
         entity = {
             "typeName": DATA_CONTRACT_TYPE,
-            "attributes": {
-                "qualifiedName": qn,
-                "status": status,
-            },
+            "attributes": attributes,
         }
         result = self.create_or_update_entity(entity)
         return {"status": "ok", "qualifiedName": qn, "new_status": status, "mutation": result}
@@ -471,9 +496,10 @@ class AtlasClient:
             }
             for spec in table_qualified_names
         ]
+        attributes = self._data_contract_base_attributes(qn, contract_id, version)
         entity = {
             "typeName": DATA_CONTRACT_TYPE,
-            "attributes": {"qualifiedName": qn},
+            "attributes": attributes,
             "relationshipAttributes": {"assigned_datasets": assigned_datasets},
         }
         result = self.create_or_update_entity(entity)
