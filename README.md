@@ -53,6 +53,15 @@ Model Context Protocol server providing AI access to Apache Atlas data catalog v
 - `remove_classification_from_entity(guid, classification_name)` — Remove a tag from an entity
 - `add_labels_to_entity(guid, labels)` — Add free-form labels (comma-separated)
 
+**Data contracts**
+- `ensure_data_contract_typedef()` — Register the `data_contract` entity and `datacontract_dataset_assignment` relationship in Atlas (run once)
+- `get_data_contract(contract_id?, version?, qualified_name?, ignore_relationships?)` — Fetch a contract with bound tables
+- `search_data_contracts(query?, status?, contract_id?, limit, offset, exclude_deleted)` — Search or list contracts
+- `create_data_contract(contract_id, version, status?, quality_rules?, qualified_name?)` — Create or update a contract (idempotent via qualifiedName)
+- `update_data_contract_status(status, contract_id?, version?, qualified_name?)` — Set contract status (e.g. `active`, `broken`)
+- `bind_contract_to_table(table_qualified_names, contract_id?, version?, qualified_name?, table_type?)` — Link contract to hive/iceberg tables
+- `delete_data_contract(contract_id?, version?, qualified_name?)` — Hard-delete a specific contract version
+
 ## Setup
 
 ### Option 1: Claude Desktop (Local)

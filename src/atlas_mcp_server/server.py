@@ -8,6 +8,7 @@ import anyio
 from .auth import AtlasAuthFactory
 from .client import AtlasClient
 from .config import ServerConfig
+from .data_contracts import parse_quality_rules, parse_table_bindings
 
 try:
     from mcp.server import FastMCP
@@ -462,6 +463,177 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         if not guid_list:
             return {"error": "No GUIDs provided"}
         return _redact(atlas.get_entities_by_guids(guid_list))
+
+    # ── Data contracts ─────────────────────────────────────────────────────
+
+    @app.tool()
+    async def ensure_data_contract_typedef() -> Dict[str, Any]:
+        """Register the data_contract entity and relationship typedefs in Atlas. **WRITE OPERATION**
+
+        Idempotent: returns status 'exists' if the type is already registered, otherwise creates it.
+        Must be run once before using the other data contract tools.
+        """
+        return _redact(atlas.ensure_data_contract_typedef())
+
+    @app.tool()
+    async def get_data_contract(
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+        ignore_relationships: bool = False,
+    ) -> Dict[str, Any]:
+        """Get a data contract by id/version or qualifiedName, including bound tables.
+
+        Args:
+            contract_id: Contract id (required unless qualified_name is given).
+            version: Contract version (required unless qualified_name is given).
+            qualified_name: Atlas qualifiedName (defaults to '{contract_id}@{version}').
+            ignore_relationships: If true, skip assigned_datasets relationship details.
+        """
+        return _redact(
+            atlas.get_data_contract(
+                contract_id=contract_id,
+                version=version,
+                qualified_name=qualified_name,
+                ignore_relationships=ignore_relationships,
+            )
+        )
+
+    @app.tool()
+    async def search_data_contracts(
+        query: str = "*",
+        status: Optional[str] = None,
+        contract_id: Optional[str] = None,
+        limit: int = 25,
+        offset: int = 0,
+        exclude_deleted: bool = True,
+    ) -> Dict[str, Any]:
+        """Search data_contract entities in Atlas.
+
+        Uses DSL when status or contract_id filters are provided; otherwise basic search.
+
+        Args:
+            query: Free-text search string. Use '*' to list all contracts.
+            status: Filter by contract status (e.g. 'active', 'broken', 'draft').
+            contract_id: Filter by contract id.
+            limit: Maximum results (default 25).
+            offset: Pagination offset.
+            exclude_deleted: Exclude deleted entities (default true).
+        """
+        return _redact(
+            atlas.search_data_contracts(
+                query=query,
+                status=status,
+                contract_id=contract_id,
+                limit=limit,
+                offset=offset,
+                exclude_deleted=exclude_deleted,
+            )
+        )
+
+    @app.tool()
+    async def create_data_contract(
+        contract_id: str,
+        version: str,
+        status: str = "draft",
+        quality_rules: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Create or update a data_contract entity in Atlas. **WRITE OPERATION**
+
+        Idempotent via qualifiedName (defaults to '{contract_id}@{version}').
+
+        Args:
+            contract_id: Unique contract identifier (ODCS contract id).
+            version: Contract version string.
+            status: Contract status (e.g. 'draft', 'active', 'broken').
+            quality_rules: Optional comma-separated rules or JSON array string.
+            qualified_name: Optional override for the Atlas qualifiedName.
+        """
+        rules = parse_quality_rules(quality_rules)
+        return _redact(
+            atlas.create_data_contract(
+                contract_id=contract_id,
+                version=version,
+                status=status,
+                quality_rules=rules or None,
+                qualified_name=qualified_name,
+            )
+        )
+
+    @app.tool()
+    async def update_data_contract_status(
+        status: str,
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Update the status of a data contract (e.g. active or broken). **WRITE OPERATION**
+
+        Args:
+            status: New status value (e.g. 'active', 'broken').
+            contract_id: Contract id (required unless qualified_name is given).
+            version: Contract version (required unless qualified_name is given).
+            qualified_name: Atlas qualifiedName (defaults to '{contract_id}@{version}').
+        """
+        return _redact(
+            atlas.update_data_contract_status(
+                status=status,
+                contract_id=contract_id,
+                version=version,
+                qualified_name=qualified_name,
+            )
+        )
+
+    @app.tool()
+    async def bind_contract_to_table(
+        table_qualified_names: str,
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+        table_type: str = "hive_table",
+    ) -> Dict[str, Any]:
+        """Bind a data contract to one or more tables via datacontract_dataset_assignment. **WRITE OPERATION**
+
+        Args:
+            table_qualified_names: Comma-separated Atlas qualifiedNames of target tables.
+            contract_id: Contract id (required unless qualified_name is given).
+            version: Contract version (required unless qualified_name is given).
+            qualified_name: Atlas qualifiedName of the contract.
+            table_type: Entity type of the tables — 'hive_table' or 'iceberg_table'.
+        """
+        bindings = parse_table_bindings(table_qualified_names, table_type=table_type)
+        return _redact(
+            atlas.bind_contract_to_tables(
+                table_qualified_names=bindings,
+                contract_id=contract_id,
+                version=version,
+                qualified_name=qualified_name,
+            )
+        )
+
+    @app.tool()
+    async def delete_data_contract(
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        """Permanently delete a specific data contract version. **WRITE OPERATION**
+
+        Performs a hard delete (purge=true) of the contract entity identified by qualifiedName.
+
+        Args:
+            contract_id: Contract id (required unless qualified_name is given).
+            version: Contract version (required unless qualified_name is given).
+            qualified_name: Atlas qualifiedName (defaults to '{contract_id}@{version}').
+        """
+        return _redact(
+            atlas.delete_data_contract(
+                contract_id=contract_id,
+                version=version,
+                qualified_name=qualified_name,
+            )
+        )
 
     return app
 

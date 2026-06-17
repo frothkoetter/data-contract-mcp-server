@@ -5,6 +5,14 @@ from typing import Any, Dict, List, Optional
 import requests
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
+from .data_contracts import (
+    DATA_CONTRACT_TYPE,
+    DATA_CONTRACT_TYPEDEF,
+    build_qualified_name,
+    parse_quality_rules,
+    parse_table_bindings,
+)
+
 
 class AtlasError(Exception):
     def __init__(self, message: str, status_code: Optional[int] = None, response_body: Optional[str] = None):
@@ -233,6 +241,36 @@ class AtlasClient:
             params={"name": attr_name},
         )
 
+    def create_or_update_entity(self, entity: Dict[str, Any]) -> Dict[str, Any]:
+        return self._post("entity", {"entity": entity})
+
+    def register_typedefs(self, typedef_payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._post("types/typedefs", typedef_payload)
+
+    def purge_entities(self, guids: List[str]) -> Any:
+        return self._put("admin/purge/", guids)
+
+    def delete_entity_permanently(
+        self,
+        type_name: str,
+        qualified_name: str,
+    ) -> Dict[str, Any]:
+        entity_resp = self.get_entity_by_attribute(type_name, "qualifiedName", qualified_name)
+        guid = entity_resp["entity"]["guid"]
+        delete_resp = self._delete(f"entity/guid/{guid}", params={"purge": "true"})
+        purge_resp: Any = None
+        try:
+            purge_resp = self.purge_entities([guid])
+        except AtlasError:
+            pass
+        return {
+            "status": "purged",
+            "guid": guid,
+            "qualifiedName": qualified_name,
+            "delete_response": delete_resp,
+            "purge_response": purge_resp,
+        }
+
     # ── Lineage ────────────────────────────────────────────────────────────
 
     def get_lineage_by_guid(
@@ -314,3 +352,152 @@ class AtlasClient:
 
     def get_relationship_by_guid(self, guid: str) -> Dict[str, Any]:
         return self._get(f"relationship/guid/{guid}")
+
+    # ── Data contracts ─────────────────────────────────────────────────────
+
+    def ensure_data_contract_typedef(self) -> Dict[str, Any]:
+        try:
+            self.get_entity_type_def(DATA_CONTRACT_TYPE)
+            return {"status": "exists", "typeName": DATA_CONTRACT_TYPE}
+        except AtlasError:
+            return self.register_typedefs(DATA_CONTRACT_TYPEDEF)
+
+    def get_data_contract(
+        self,
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+        ignore_relationships: bool = False,
+    ) -> Dict[str, Any]:
+        qn = qualified_name or build_qualified_name(
+            _require(contract_id, "contract_id"),
+            _require(version, "version"),
+        )
+        return self.get_entity_by_attribute(
+            DATA_CONTRACT_TYPE,
+            "qualifiedName",
+            qn,
+            ignore_relationships=ignore_relationships,
+        )
+
+    def search_data_contracts(
+        self,
+        query: str = "*",
+        status: Optional[str] = None,
+        contract_id: Optional[str] = None,
+        limit: int = 25,
+        offset: int = 0,
+        exclude_deleted: bool = True,
+    ) -> Dict[str, Any]:
+        if status or contract_id:
+            clauses: List[str] = []
+            if status:
+                clauses.append(f'status="{status}"')
+            if contract_id:
+                clauses.append(f'contractId="{contract_id}"')
+            dsl_query = f"{DATA_CONTRACT_TYPE} where {' and '.join(clauses)}"
+            return self.search_dsl(dsl_query, limit=limit, offset=offset)
+        return self.search_basic(
+            query=query,
+            type_name=DATA_CONTRACT_TYPE,
+            limit=limit,
+            offset=offset,
+            exclude_deleted=exclude_deleted,
+        )
+
+    def create_data_contract(
+        self,
+        contract_id: str,
+        version: str,
+        status: str,
+        quality_rules: Optional[List[str]] = None,
+        qualified_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        qn = qualified_name or build_qualified_name(contract_id, version)
+        attributes: Dict[str, Any] = {
+            "qualifiedName": qn,
+            "contractId": contract_id,
+            "version": version,
+            "status": status,
+        }
+        if quality_rules:
+            attributes["quality_rules"] = quality_rules
+        entity = {"typeName": DATA_CONTRACT_TYPE, "attributes": attributes}
+        result = self.create_or_update_entity(entity)
+        return {
+            "status": "ok",
+            "qualifiedName": qn,
+            "contractId": contract_id,
+            "version": version,
+            "mutation": result,
+        }
+
+    def update_data_contract_status(
+        self,
+        status: str,
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        qn = qualified_name or build_qualified_name(
+            _require(contract_id, "contract_id"),
+            _require(version, "version"),
+        )
+        entity = {
+            "typeName": DATA_CONTRACT_TYPE,
+            "attributes": {
+                "qualifiedName": qn,
+                "status": status,
+            },
+        }
+        result = self.create_or_update_entity(entity)
+        return {"status": "ok", "qualifiedName": qn, "new_status": status, "mutation": result}
+
+    def bind_contract_to_tables(
+        self,
+        table_qualified_names: List[Dict[str, str]],
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        qn = qualified_name or build_qualified_name(
+            _require(contract_id, "contract_id"),
+            _require(version, "version"),
+        )
+        assigned_datasets = [
+            {
+                "typeName": spec["type_name"],
+                "uniqueAttributes": {"qualifiedName": spec["qualified_name"]},
+            }
+            for spec in table_qualified_names
+        ]
+        entity = {
+            "typeName": DATA_CONTRACT_TYPE,
+            "attributes": {"qualifiedName": qn},
+            "relationshipAttributes": {"assigned_datasets": assigned_datasets},
+        }
+        result = self.create_or_update_entity(entity)
+        return {
+            "status": "ok",
+            "qualifiedName": qn,
+            "bound_tables": [spec["qualified_name"] for spec in table_qualified_names],
+            "mutation": result,
+        }
+
+    def delete_data_contract(
+        self,
+        contract_id: Optional[str] = None,
+        version: Optional[str] = None,
+        qualified_name: Optional[str] = None,
+    ) -> Dict[str, Any]:
+        qn = qualified_name or build_qualified_name(
+            _require(contract_id, "contract_id"),
+            _require(version, "version"),
+        )
+        return self.delete_entity_permanently(DATA_CONTRACT_TYPE, qn)
+
+
+def _require(value: Optional[str], name: str) -> str:
+    if not value:
+        raise ValueError(f"{name} is required when qualified_name is not provided")
+    return value
