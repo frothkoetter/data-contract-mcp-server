@@ -48,7 +48,7 @@ def build_client(config: ServerConfig) -> AtlasClient:
 
 
 def create_server(atlas: AtlasClient) -> FastMCP:
-    app = FastMCP("atlas-mcp-server")
+    app = FastMCP("data-contract-mcp-server")
 
     # ── Admin / Status ─────────────────────────────────────────────────────
 

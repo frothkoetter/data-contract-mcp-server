@@ -15,8 +15,8 @@ import json
 import sys
 import time
 
-from atlas_mcp_server.config import ServerConfig
-from atlas_mcp_server.server import build_client
+from data_contract_mcp_server.config import ServerConfig
+from data_contract_mcp_server.server import build_client
 
 
 def main() -> int:

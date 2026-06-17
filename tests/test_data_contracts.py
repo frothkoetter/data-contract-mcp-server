@@ -5,8 +5,8 @@ import json
 import pytest
 from pytest_httpserver import HTTPServer
 
-from atlas_mcp_server.client import AtlasClient
-from atlas_mcp_server.data_contracts import (
+from data_contract_mcp_server.client import AtlasClient
+from data_contract_mcp_server.data_contracts import (
     build_qualified_name,
     parse_quality_rules,
     parse_table_bindings,

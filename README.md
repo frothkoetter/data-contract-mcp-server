@@ -1,6 +1,6 @@
-# Atlas MCP Server
+# Data Contract MCP Server
 
-Model Context Protocol server providing AI access to Apache Atlas data catalog via Apache Knox.
+Model Context Protocol server for managing ODCS data contracts in Apache Atlas, with full read access to the Atlas data catalog via Apache Knox.
 
 ## Features
 
@@ -69,7 +69,7 @@ Model Context Protocol server providing AI access to Apache Atlas data catalog v
 1. **Clone and install:**
    ```bash
    git clone <repo-url>
-   cd Atlas-MCP-Server
+   cd data-contract-mcp-server
    python3 -m venv .venv
    source .venv/bin/activate
    pip install -e .
@@ -79,9 +79,9 @@ Model Context Protocol server providing AI access to Apache Atlas data catalog v
    ```json
    {
      "mcpServers": {
-       "atlas-mcp-server": {
-         "command": "/FULL/PATH/TO/Atlas-MCP-Server/.venv/bin/python",
-         "args": ["-m", "atlas_mcp_server.server"],
+       "data-contract-mcp-server": {
+         "command": "/FULL/PATH/TO/data-contract-mcp-server/.venv/bin/python",
+         "args": ["-m", "data_contract_mcp_server.server"],
          "env": {
            "MCP_TRANSPORT": "stdio",
            "ATLAS_GATEWAY_URL": "https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/",
@@ -99,7 +99,7 @@ Model Context Protocol server providing AI access to Apache Atlas data catalog v
 ```json
 {
   "mcpServers": {
-    "atlas-mcp-server": {
+    "data-contract-mcp-server": {
       "command": "uvx",
       "args": [
         "--from",
