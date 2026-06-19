@@ -1,7 +1,9 @@
 from __future__ import annotations
 
 import json
-from typing import Any, Dict, List, Mapping, Optional
+from typing import Any, Dict, List, Mapping, Optional, Sequence, Union
+
+JsonArrayInput = Union[str, Sequence[Any], None]
 
 DATA_CONTRACT_TYPE = "data_contract"
 DATA_CONTRACT_RELATIONSHIP = "datacontract_dataset_assignment"
@@ -26,6 +28,10 @@ _ODCS_KEY_ALIASES: Dict[str, str] = {
     "mustBeLessThan": "threshold",
     "must_be_less_than": "threshold",
     "valueExt": "value_ext",
+    "columnName": "name",
+    "column_name": "name",
+    "dataType": "physical_type",
+    "data_type": "physical_type",
     "slaDefaultElement": "sla_default_element",
 }
 
@@ -286,33 +292,65 @@ def _version_key(version: str) -> tuple[int, ...]:
     return tuple(parts)
 
 
-def parse_quality_rules(quality_rules: str | None) -> List[str]:
+def coerce_json_array(value: JsonArrayInput, field_name: str) -> List[Any]:
+    if value is None:
+        return []
+    if isinstance(value, list):
+        return value
+    if isinstance(value, str):
+        stripped = value.strip()
+        if not stripped:
+            return []
+        parsed = json.loads(stripped)
+        if not isinstance(parsed, list):
+            raise ValueError(f"{field_name} JSON must be an array")
+        return parsed
+    raise ValueError(f"{field_name} must be a JSON array string or a list")
+
+
+def parse_quality_rules(quality_rules: JsonArrayInput | str) -> List[str]:
     if not quality_rules:
         return []
+    if isinstance(quality_rules, list):
+        rules: List[str] = []
+        for item in quality_rules:
+            if isinstance(item, str):
+                text = item.strip()
+            elif isinstance(item, Mapping):
+                text = str(
+                    item.get("description")
+                    or item.get("name")
+                    or item.get("rule")
+                    or item.get("metric")
+                    or json.dumps(item, ensure_ascii=False)
+                ).strip()
+            else:
+                text = str(item).strip()
+            if text:
+                rules.append(text)
+        return rules
+    if not isinstance(quality_rules, str):
+        raise ValueError("quality_rules must be a string, list, or JSON array string")
     stripped = quality_rules.strip()
     if stripped.startswith("["):
         parsed = json.loads(stripped)
         if not isinstance(parsed, list):
             raise ValueError("quality_rules JSON must be an array of strings")
-        return [str(item).strip() for item in parsed if str(item).strip()]
+        return parse_quality_rules(parsed)
     return [rule.strip() for rule in stripped.split(",") if rule.strip()]
 
 
-def parse_json_array(value: str | None, field_name: str) -> List[Any]:
-    if not value:
-        return []
-    stripped = value.strip()
-    if not stripped:
-        return []
-    parsed = json.loads(stripped)
-    if not isinstance(parsed, list):
-        raise ValueError(f"{field_name} JSON must be an array")
-    return parsed
+def parse_json_array(value: JsonArrayInput, field_name: str) -> List[Any]:
+    return coerce_json_array(value, field_name)
 
 
-def parse_tags(tags: str | None) -> List[str]:
+def parse_tags(tags: JsonArrayInput | str) -> List[str]:
     if not tags:
         return []
+    if isinstance(tags, list):
+        return [str(item).strip() for item in tags if str(item).strip()]
+    if not isinstance(tags, str):
+        raise ValueError("tags must be a string, list, or JSON array string")
     stripped = tags.strip()
     if stripped.startswith("["):
         parsed = json.loads(stripped)
@@ -326,6 +364,14 @@ def _normalize_mapping(raw: Mapping[str, Any]) -> Dict[str, Any]:
     normalized: Dict[str, Any] = {}
     for key, value in raw.items():
         atlas_key = _ODCS_KEY_ALIASES.get(key, key)
+        if key in {"nullable", "Nullable"}:
+            if isinstance(value, bool):
+                normalized["is_required"] = not value
+            elif isinstance(value, str):
+                normalized["is_required"] = value.strip().upper() in {"NO", "FALSE", "0", "N"}
+            continue
+        if atlas_key == "nullable":
+            continue
         if atlas_key == "properties" and isinstance(value, list):
             normalized[atlas_key] = [_normalize_schema_property(item) for item in value]
         elif isinstance(value, Mapping):
@@ -345,8 +391,8 @@ def _normalize_schema_property(raw: Any) -> Dict[str, Any]:
     return _normalize_mapping(raw)
 
 
-def parse_schema_objects(schema_objects: str | None) -> List[Dict[str, Any]]:
-    items = parse_json_array(schema_objects, "schema_objects")
+def parse_schema_objects(schema_objects: JsonArrayInput) -> List[Dict[str, Any]]:
+    items = coerce_json_array(schema_objects, "schema_objects")
     result: List[Dict[str, Any]] = []
     for item in items:
         if not isinstance(item, Mapping):
@@ -358,8 +404,8 @@ def parse_schema_objects(schema_objects: str | None) -> List[Dict[str, Any]]:
     return result
 
 
-def parse_struct_quality_rules(quality: str | None) -> List[Dict[str, Any]]:
-    items = parse_json_array(quality, "quality")
+def parse_struct_quality_rules(quality: JsonArrayInput) -> List[Dict[str, Any]]:
+    items = coerce_json_array(quality, "quality")
     result: List[Dict[str, Any]] = []
     for item in items:
         if not isinstance(item, Mapping):
@@ -371,8 +417,8 @@ def parse_struct_quality_rules(quality: str | None) -> List[Dict[str, Any]]:
     return result
 
 
-def parse_struct_sla_properties(sla_properties: str | None) -> List[Dict[str, Any]]:
-    items = parse_json_array(sla_properties, "sla_properties")
+def parse_struct_sla_properties(sla_properties: JsonArrayInput) -> List[Dict[str, Any]]:
+    items = coerce_json_array(sla_properties, "sla_properties")
     result: List[Dict[str, Any]] = []
     for item in items:
         if not isinstance(item, Mapping):

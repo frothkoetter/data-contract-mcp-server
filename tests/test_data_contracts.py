@@ -44,7 +44,31 @@ def test_parse_quality_rules() -> None:
     assert parse_quality_rules('["x", "y"]') == ["x", "y"]
 
 
-def test_parse_schema_objects_accepts_odcs_camel_case() -> None:
+def test_parse_quality_rules_accepts_native_list() -> None:
+    assert parse_quality_rules(["rule a", "rule b"]) == ["rule a", "rule b"]
+    assert parse_quality_rules([{"description": "PK must be unique"}]) == ["PK must be unique"]
+
+
+def test_parse_schema_objects_accepts_native_list_with_column_aliases() -> None:
+    parsed = parse_schema_objects(
+        [
+            {
+                "name": "mart_credit_quality_matrix",
+                "logicalType": "object",
+                "properties": [
+                    {
+                        "column_name": "icas_rating",
+                        "data_type": "int",
+                        "nullable": "NO",
+                        "description": "ICAS rating category",
+                    }
+                ],
+            }
+        ]
+    )
+    assert parsed[0]["properties"][0]["name"] == "icas_rating"
+    assert parsed[0]["properties"][0]["physical_type"] == "int"
+    assert parsed[0]["properties"][0]["is_required"] is True
     parsed = parse_schema_objects(
         json.dumps(
             [

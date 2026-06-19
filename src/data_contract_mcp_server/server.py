@@ -1,5 +1,6 @@
 from __future__ import annotations
 
+import json
 import os
 from typing import Any, Dict, List, Optional
 
@@ -554,57 +555,69 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         tags: Optional[str] = None,
         sla_default_element: Optional[str] = None,
         odcs_document: Optional[str] = None,
-        schema_objects: Optional[str] = None,
-        quality: Optional[str] = None,
-        sla_properties: Optional[str] = None,
+        schema_objects: Optional[Any] = None,
+        quality: Optional[Any] = None,
+        sla_properties: Optional[Any] = None,
     ) -> Dict[str, Any]:
         """Create or update a data_contract entity in Atlas. **WRITE OPERATION**
 
         Idempotent via qualifiedName (defaults to '{contract_id}@{version}').
-        Supports ODCS hybrid storage: searchable primitives, struct arrays for schema/quality/SLA,
-        and a full odcs_document payload.
+        Structured fields (`schema_objects`, `quality`, `sla_properties`, `quality_rules`, `tags`)
+        accept either a JSON array string OR a native JSON/list value (for CrewAI/agent callers).
 
         Args:
             contract_id: Unique contract identifier (ODCS contract id).
-            version: Contract version string.
+            version: Contract version string (e.g. 'v1.0' or '1.0').
             status: Contract status (e.g. 'draft', 'active', 'broken').
-            quality_rules: Optional legacy comma-separated rules or JSON array string.
+            quality_rules: Legacy rules as comma-separated text, JSON string array, or list of strings/objects.
             qualified_name: Optional override for the Atlas qualifiedName.
             name: ODCS contract name.
-            domain: ODCS domain.
+            domain: ODCS domain (e.g. database or product domain).
             data_product: ODCS data product name.
             tenant: ODCS tenant.
             description_purpose: Intended purpose of the data.
             description_limitations: Usage limitations.
-            tags: Comma-separated tags or JSON array string.
+            tags: Comma-separated tags, JSON array string, or list of strings.
             sla_default_element: Default SLA element path (ODCS slaDefaultElement).
             odcs_document: Full ODCS contract as YAML or JSON string.
-            schema_objects: JSON array of schema objects with nested properties (ODCS schema).
-            quality: JSON array of structured quality rules (supports metric=freshness).
-            sla_properties: JSON array of SLA properties (supports property=freshness).
+            schema_objects: Schema objects with nested properties (list or JSON string). Column aliases
+                `column_name`, `data_type`, and `nullable` (NO/YES) are accepted in properties.
+            quality: Structured quality rules (list or JSON string).
+            sla_properties: SLA properties such as frequency/freshness (list or JSON string).
         """
-        rules = parse_quality_rules(quality_rules)
-        return _redact(
-            atlas.create_data_contract(
-                contract_id=contract_id,
-                version=version,
-                status=status,
-                quality_rules=rules or None,
-                qualified_name=qualified_name,
-                name=name,
-                domain=domain,
-                data_product=data_product,
-                tenant=tenant,
-                description_purpose=description_purpose,
-                description_limitations=description_limitations,
-                tags=parse_tags(tags) or None,
-                sla_default_element=sla_default_element,
-                odcs_document=odcs_document,
-                schema_objects=parse_schema_objects(schema_objects) or None,
-                quality=parse_struct_quality_rules(quality) or None,
-                sla_properties=parse_struct_sla_properties(sla_properties) or None,
+        try:
+            rules = parse_quality_rules(quality_rules)
+            return _redact(
+                atlas.create_data_contract(
+                    contract_id=contract_id,
+                    version=version,
+                    status=status,
+                    quality_rules=rules or None,
+                    qualified_name=qualified_name,
+                    name=name,
+                    domain=domain,
+                    data_product=data_product,
+                    tenant=tenant,
+                    description_purpose=description_purpose,
+                    description_limitations=description_limitations,
+                    tags=parse_tags(tags) or None,
+                    sla_default_element=sla_default_element,
+                    odcs_document=odcs_document,
+                    schema_objects=parse_schema_objects(schema_objects) or None,
+                    quality=parse_struct_quality_rules(quality) or None,
+                    sla_properties=parse_struct_sla_properties(sla_properties) or None,
+                )
             )
-        )
+        except (ValueError, json.JSONDecodeError) as exc:
+            return {
+                "status": "validation_error",
+                "error": str(exc),
+                "hint": (
+                    "Structured fields accept a JSON array string OR a native list. "
+                    "For schema, pass [{name, logicalType/object, properties:[{name, logicalType, ...}]}]. "
+                    "Use quality_rules for plain-text rules or quality for structured ODCS rules."
+                ),
+            }
 
     @app.tool()
     async def update_data_contract_status(
