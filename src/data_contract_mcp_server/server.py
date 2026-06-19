@@ -8,7 +8,14 @@ import anyio
 from .auth import AtlasAuthFactory
 from .client import AtlasClient
 from .config import ServerConfig
-from .data_contracts import parse_quality_rules, parse_table_bindings
+from .data_contracts import (
+    parse_quality_rules,
+    parse_schema_objects,
+    parse_struct_quality_rules,
+    parse_struct_sla_properties,
+    parse_table_bindings,
+    parse_tags,
+)
 
 try:
     from mcp.server import FastMCP
@@ -538,17 +545,43 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         status: str = "draft",
         quality_rules: Optional[str] = None,
         qualified_name: Optional[str] = None,
+        name: Optional[str] = None,
+        domain: Optional[str] = None,
+        data_product: Optional[str] = None,
+        tenant: Optional[str] = None,
+        description_purpose: Optional[str] = None,
+        description_limitations: Optional[str] = None,
+        tags: Optional[str] = None,
+        sla_default_element: Optional[str] = None,
+        odcs_document: Optional[str] = None,
+        schema_objects: Optional[str] = None,
+        quality: Optional[str] = None,
+        sla_properties: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create or update a data_contract entity in Atlas. **WRITE OPERATION**
 
         Idempotent via qualifiedName (defaults to '{contract_id}@{version}').
+        Supports ODCS hybrid storage: searchable primitives, struct arrays for schema/quality/SLA,
+        and a full odcs_document payload.
 
         Args:
             contract_id: Unique contract identifier (ODCS contract id).
             version: Contract version string.
             status: Contract status (e.g. 'draft', 'active', 'broken').
-            quality_rules: Optional comma-separated rules or JSON array string.
+            quality_rules: Optional legacy comma-separated rules or JSON array string.
             qualified_name: Optional override for the Atlas qualifiedName.
+            name: ODCS contract name.
+            domain: ODCS domain.
+            data_product: ODCS data product name.
+            tenant: ODCS tenant.
+            description_purpose: Intended purpose of the data.
+            description_limitations: Usage limitations.
+            tags: Comma-separated tags or JSON array string.
+            sla_default_element: Default SLA element path (ODCS slaDefaultElement).
+            odcs_document: Full ODCS contract as YAML or JSON string.
+            schema_objects: JSON array of schema objects with nested properties (ODCS schema).
+            quality: JSON array of structured quality rules (supports metric=freshness).
+            sla_properties: JSON array of SLA properties (supports property=freshness).
         """
         rules = parse_quality_rules(quality_rules)
         return _redact(
@@ -558,6 +591,18 @@ def create_server(atlas: AtlasClient) -> FastMCP:
                 status=status,
                 quality_rules=rules or None,
                 qualified_name=qualified_name,
+                name=name,
+                domain=domain,
+                data_product=data_product,
+                tenant=tenant,
+                description_purpose=description_purpose,
+                description_limitations=description_limitations,
+                tags=parse_tags(tags) or None,
+                sla_default_element=sla_default_element,
+                odcs_document=odcs_document,
+                schema_objects=parse_schema_objects(schema_objects) or None,
+                quality=parse_struct_quality_rules(quality) or None,
+                sla_properties=parse_struct_sla_properties(sla_properties) or None,
             )
         )
 

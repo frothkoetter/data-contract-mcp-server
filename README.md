@@ -103,11 +103,10 @@ Model Context Protocol server for managing ODCS data contracts in Apache Atlas, 
       "command": "uvx",
       "args": [
         "--from",
-        "git+<repo-url>@main",
+        "git+https://github.com/frothkoetter/data-contract-mcp-server.git@datacontract",
         "run-server"
       ],
       "env": {
-        "MCP_TRANSPORT": "stdio",
         "ATLAS_GATEWAY_URL": "https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/",
         "KNOX_TOKEN": "<your_knox_jwt_token>"
       }

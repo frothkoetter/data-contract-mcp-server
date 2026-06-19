@@ -6,11 +6,18 @@ import requests
 from tenacity import retry, retry_if_exception_type, stop_after_attempt, wait_exponential
 
 from .data_contracts import (
+    DATA_CONTRACT_STRUCT_DEFS,
     DATA_CONTRACT_TYPE,
     DATA_CONTRACT_TYPEDEF,
+    DATA_CONTRACT_TYPE_VERSION,
+    build_data_contract_attributes,
+    build_entity_typedef_upgrade,
+    build_struct_typedef_upgrade,
     build_qualified_name,
     parse_quality_rules,
     parse_table_bindings,
+    preserve_contract_attributes,
+    typedef_needs_upgrade,
 )
 
 
@@ -249,6 +256,9 @@ class AtlasClient:
     def register_typedefs(self, typedef_payload: Dict[str, Any]) -> Dict[str, Any]:
         return self._post("types/typedefs", typedef_payload)
 
+    def update_typedefs(self, typedef_payload: Dict[str, Any]) -> Dict[str, Any]:
+        return self._put("types/typedefs", typedef_payload)
+
     def purge_entities(self, guids: List[str]) -> Any:
         return self._put("admin/purge/", guids, v2=False)
 
@@ -357,12 +367,65 @@ class AtlasClient:
 
     # ── Data contracts ─────────────────────────────────────────────────────
 
+    def _register_struct_typedefs(self) -> Optional[Dict[str, Any]]:
+        last_result: Optional[Dict[str, Any]] = None
+        for struct_def in DATA_CONTRACT_STRUCT_DEFS:
+            try:
+                existing = self._get(f"types/structdef/name/{struct_def['name']}")
+                merged = build_struct_typedef_upgrade(existing, struct_def)
+                existing_names = {a["name"] for a in existing.get("attributeDefs") or []}
+                merged_names = {a["name"] for a in merged.get("attributeDefs") or []}
+                if merged_names != existing_names or merged.get("typeVersion") != existing.get(
+                    "typeVersion"
+                ):
+                    last_result = self.update_typedefs({"structDefs": [merged]})
+            except AtlasError as exc:
+                if exc.status_code == 404:
+                    try:
+                        last_result = self.register_typedefs({"structDefs": [struct_def]})
+                    except AtlasError as create_exc:
+                        if create_exc.status_code != 409:
+                            raise
+                elif exc.status_code != 409:
+                    raise
+        return last_result
+
+    def upgrade_data_contract_typedef(
+        self,
+        existing: Optional[Dict[str, Any]] = None,
+    ) -> Dict[str, Any]:
+        current = existing or self.get_entity_type_def(DATA_CONTRACT_TYPE)
+        struct_mutation = self._register_struct_typedefs()
+        entity_mutation = self.update_typedefs(
+            {"entityDefs": [build_entity_typedef_upgrade(current)]}
+        )
+        return {
+            "status": "upgraded",
+            "typeName": DATA_CONTRACT_TYPE,
+            "typeVersion": DATA_CONTRACT_TYPE_VERSION,
+            "struct_mutation": struct_mutation,
+            "entity_mutation": entity_mutation,
+        }
+
     def ensure_data_contract_typedef(self) -> Dict[str, Any]:
         try:
-            self.get_entity_type_def(DATA_CONTRACT_TYPE)
-            return {"status": "exists", "typeName": DATA_CONTRACT_TYPE}
-        except AtlasError:
-            return self.register_typedefs(DATA_CONTRACT_TYPEDEF)
+            existing = self.get_entity_type_def(DATA_CONTRACT_TYPE)
+            if typedef_needs_upgrade(existing):
+                return self.upgrade_data_contract_typedef(existing)
+            return {
+                "status": "exists",
+                "typeName": DATA_CONTRACT_TYPE,
+                "typeVersion": existing.get("typeVersion"),
+            }
+        except AtlasError as exc:
+            if exc.status_code != 404:
+                raise
+            try:
+                return self.register_typedefs(DATA_CONTRACT_TYPEDEF)
+            except AtlasError as create_exc:
+                if create_exc.status_code == 409:
+                    return self.upgrade_data_contract_typedef()
+                raise
 
     def get_data_contract(
         self,
@@ -417,13 +480,7 @@ class AtlasClient:
             existing = self.get_entity_by_attribute(
                 DATA_CONTRACT_TYPE, "qualifiedName", qualified_name
             )
-            attrs = existing["entity"]["attributes"]
-            return {
-                "qualifiedName": qualified_name,
-                "contractId": attrs["contractId"],
-                "version": attrs["version"],
-                "status": attrs["status"],
-            }
+            return preserve_contract_attributes(existing["entity"]["attributes"])
         except AtlasError:
             return {
                 "qualifiedName": qualified_name,
@@ -438,16 +495,47 @@ class AtlasClient:
         status: str,
         quality_rules: Optional[List[str]] = None,
         qualified_name: Optional[str] = None,
+        name: Optional[str] = None,
+        domain: Optional[str] = None,
+        data_product: Optional[str] = None,
+        tenant: Optional[str] = None,
+        description_purpose: Optional[str] = None,
+        description_limitations: Optional[str] = None,
+        tags: Optional[List[str]] = None,
+        sla_default_element: Optional[str] = None,
+        odcs_document: Optional[str] = None,
+        schema_objects: Optional[List[Dict[str, Any]]] = None,
+        quality: Optional[List[Dict[str, Any]]] = None,
+        sla_properties: Optional[List[Dict[str, Any]]] = None,
     ) -> Dict[str, Any]:
         qn = qualified_name or build_qualified_name(contract_id, version)
-        attributes: Dict[str, Any] = {
-            "qualifiedName": qn,
-            "contractId": contract_id,
-            "version": version,
-            "status": status,
-        }
-        if quality_rules:
-            attributes["quality_rules"] = quality_rules
+        existing_attrs: Optional[Dict[str, Any]] = None
+        try:
+            existing = self.get_entity_by_attribute(DATA_CONTRACT_TYPE, "qualifiedName", qn)
+            existing_attrs = existing["entity"]["attributes"]
+        except AtlasError:
+            pass
+
+        attributes = build_data_contract_attributes(
+            qualified_name=qn,
+            contract_id=contract_id,
+            version=version,
+            status=status,
+            quality_rules=quality_rules,
+            name=name,
+            domain=domain,
+            data_product=data_product,
+            tenant=tenant,
+            description_purpose=description_purpose,
+            description_limitations=description_limitations,
+            tags=tags,
+            sla_default_element=sla_default_element,
+            odcs_document=odcs_document,
+            schema_objects=schema_objects,
+            quality=quality,
+            sla_properties=sla_properties,
+            existing_attrs=existing_attrs,
+        )
         entity = {"typeName": DATA_CONTRACT_TYPE, "attributes": attributes}
         result = self.create_or_update_entity(entity)
         return {
