@@ -10,6 +10,7 @@ from .auth import AtlasAuthFactory
 from .client import AtlasClient
 from .config import ServerConfig
 from .data_contracts import (
+    parse_consumers,
     parse_quality_rules,
     parse_schema_objects,
     parse_struct_quality_rules,
@@ -552,7 +553,8 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         tenant: Optional[str] = None,
         description_purpose: Optional[str] = None,
         description_limitations: Optional[str] = None,
-        tags: Optional[str] = None,
+        tags: Optional[Any] = None,
+        consumer: Optional[Any] = None,
         sla_default_element: Optional[str] = None,
         odcs_document: Optional[str] = None,
         schema_objects: Optional[Any] = None,
@@ -578,6 +580,8 @@ def create_server(atlas: AtlasClient) -> FastMCP:
             description_purpose: Intended purpose of the data.
             description_limitations: Usage limitations.
             tags: Comma-separated tags, JSON array string, or list of strings.
+            consumer: Contract consumers — roles, groups, or persons (comma-separated,
+                JSON array string, or list of strings).
             sla_default_element: Default SLA element path (ODCS slaDefaultElement).
             odcs_document: Full ODCS contract as YAML or JSON string.
             schema_objects: Schema objects with nested properties (list or JSON string). Column aliases
@@ -601,6 +605,7 @@ def create_server(atlas: AtlasClient) -> FastMCP:
                     description_purpose=description_purpose,
                     description_limitations=description_limitations,
                     tags=parse_tags(tags) or None,
+                    consumer=parse_consumers(consumer) or None,
                     sla_default_element=sla_default_element,
                     odcs_document=odcs_document,
                     schema_objects=parse_schema_objects(schema_objects) or None,

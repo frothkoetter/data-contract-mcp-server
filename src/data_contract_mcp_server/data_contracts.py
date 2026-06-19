@@ -7,7 +7,7 @@ JsonArrayInput = Union[str, Sequence[Any], None]
 
 DATA_CONTRACT_TYPE = "data_contract"
 DATA_CONTRACT_RELATIONSHIP = "datacontract_dataset_assignment"
-DATA_CONTRACT_TYPE_VERSION = "2.1"
+DATA_CONTRACT_TYPE_VERSION = "2.2"
 SUPPORTED_TABLE_TYPES = frozenset({"hive_table", "iceberg_table"})
 
 STRUCT_SCHEMA_PROPERTY = "odcs_schema_property"
@@ -47,6 +47,7 @@ _DATA_CONTRACT_PRESERVED_ATTRS = (
     "description_purpose",
     "description_limitations",
     "tags",
+    "consumer",
     "sla_default_element",
     "freshness_sla",
     "freshness_quality_threshold",
@@ -156,6 +157,13 @@ _DATA_CONTRACT_V2_ATTRS: List[Dict[str, Any]] = [
         "typeName": "array<string>",
         "isOptional": True,
         "cardinality": "SET",
+    },
+    {
+        "name": "consumer",
+        "typeName": "array<string>",
+        "isOptional": True,
+        "cardinality": "SET",
+        "isIndexable": True,
     },
     _optional_attr("sla_default_element", "string"),
     _optional_attr("freshness_sla", "string") | {"isIndexable": True},
@@ -345,19 +353,28 @@ def parse_json_array(value: JsonArrayInput, field_name: str) -> List[Any]:
 
 
 def parse_tags(tags: JsonArrayInput | str) -> List[str]:
-    if not tags:
+    return _parse_string_array(tags, "tags")
+
+
+def parse_consumers(consumers: JsonArrayInput | str) -> List[str]:
+    """Parse contract consumers (roles, groups, or persons)."""
+    return _parse_string_array(consumers, "consumer")
+
+
+def _parse_string_array(value: JsonArrayInput | str, field_name: str) -> List[str]:
+    if not value:
         return []
-    if isinstance(tags, list):
-        return [str(item).strip() for item in tags if str(item).strip()]
-    if not isinstance(tags, str):
-        raise ValueError("tags must be a string, list, or JSON array string")
-    stripped = tags.strip()
+    if isinstance(value, list):
+        return [str(item).strip() for item in value if str(item).strip()]
+    if not isinstance(value, str):
+        raise ValueError(f"{field_name} must be a string, list, or JSON array string")
+    stripped = value.strip()
     if stripped.startswith("["):
         parsed = json.loads(stripped)
         if not isinstance(parsed, list):
-            raise ValueError("tags JSON must be an array of strings")
+            raise ValueError(f"{field_name} JSON must be an array of strings")
         return [str(item).strip() for item in parsed if str(item).strip()]
-    return [tag.strip() for tag in stripped.split(",") if tag.strip()]
+    return [part.strip() for part in stripped.split(",") if part.strip()]
 
 
 def _normalize_mapping(raw: Mapping[str, Any]) -> Dict[str, Any]:
@@ -547,6 +564,7 @@ def build_data_contract_attributes(
     description_purpose: Optional[str] = None,
     description_limitations: Optional[str] = None,
     tags: Optional[List[str]] = None,
+    consumer: Optional[List[str]] = None,
     sla_default_element: Optional[str] = None,
     odcs_document: Optional[str] = None,
     schema_objects: Optional[List[Dict[str, Any]]] = None,
@@ -587,6 +605,8 @@ def build_data_contract_attributes(
         attributes["quality_rules"] = quality_rules
     if tags is not None:
         attributes["tags"] = tags
+    if consumer is not None:
+        attributes["consumer"] = consumer
     if schema_objects is not None:
         atlas_objects, atlas_properties = flatten_schema_for_atlas(schema_objects)
         attributes["schema_objects"] = atlas_objects

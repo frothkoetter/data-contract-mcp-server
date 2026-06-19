@@ -49,6 +49,28 @@ def test_parse_quality_rules_accepts_native_list() -> None:
     assert parse_quality_rules([{"description": "PK must be unique"}]) == ["PK must be unique"]
 
 
+def test_parse_consumers_accepts_native_list() -> None:
+    from data_contract_mcp_server.data_contracts import parse_consumers
+
+    assert parse_consumers(["role:risk-analyst", "group:finance", "person:jane.doe"]) == [
+        "role:risk-analyst",
+        "group:finance",
+        "person:jane.doe",
+    ]
+    assert parse_consumers("team-a, team-b") == ["team-a", "team-b"]
+
+
+def test_build_data_contract_attributes_includes_consumer() -> None:
+    attrs = build_data_contract_attributes(
+        qualified_name="c1@1.0",
+        contract_id="c1",
+        version="1.0",
+        status="draft",
+        consumer=["group:risk-analytics", "person:frothkoe"],
+    )
+    assert attrs["consumer"] == ["group:risk-analytics", "person:frothkoe"]
+
+
 def test_parse_schema_objects_accepts_native_list_with_column_aliases() -> None:
     parsed = parse_schema_objects(
         [
