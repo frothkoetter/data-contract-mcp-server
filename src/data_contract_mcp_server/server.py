@@ -545,7 +545,7 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         contract_id: str,
         version: str,
         status: str = "draft",
-        quality_rules: Optional[str] = None,
+        quality_rules: Optional[Any] = None,
         qualified_name: Optional[str] = None,
         name: Optional[str] = None,
         domain: Optional[str] = None,
