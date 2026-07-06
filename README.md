@@ -108,7 +108,8 @@ Model Context Protocol server for managing ODCS data contracts in Apache Atlas, 
       ],
       "env": {
         "ATLAS_GATEWAY_URL": "https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/",
-        "KNOX_TOKEN": "<your_knox_jwt_token>"
+        "ATLAS_USER": "<your_username>",
+        "ATLAS_PASS": "<your_password>"
       }
     }
   }
