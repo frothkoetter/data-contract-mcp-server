@@ -19,6 +19,9 @@ from data_contract_mcp_server.data_contracts import (
     flatten_schema_for_atlas,
     parse_quality_rules,
     parse_schema_objects,
+    parse_enforcement_default_action,
+    parse_enforcement_mode,
+    parse_enforcement_policies,
     parse_struct_quality_rules,
     parse_struct_sla_properties,
     parse_table_bindings,
@@ -33,6 +36,93 @@ def atlas(httpserver: HTTPServer) -> AtlasClient:
     session = requests.Session()
     session.verify = True
     return AtlasClient(httpserver.url_for(""), session, timeout_seconds=5)
+
+
+def test_parse_enforcement_policies() -> None:
+    policies = parse_enforcement_policies(
+        [
+            {
+                "name": "freshness-block",
+                "trigger": "quality_violation",
+                "action": "block_and_alert",
+                "ruleFilter": "freshness",
+                "severity": "critical",
+                "notifyChannel": "slack",
+                "notifyTargets": ["#alerts", "owner@example.com"],
+                "rangerPolicyTemplate": "deny_read",
+            }
+        ]
+    )
+    assert policies[0]["name"] == "freshness-block"
+    assert policies[0]["trigger"] == "quality_violation"
+    assert policies[0]["action"] == "block_and_alert"
+    assert policies[0]["rule_filter"] == "freshness"
+    assert policies[0]["notify_targets"] == "#alerts, owner@example.com"
+
+
+def test_parse_enforcement_policies_validates_enums() -> None:
+    with pytest.raises(ValueError, match="trigger must be one of"):
+        parse_enforcement_policies([{"name": "x", "trigger": "invalid", "action": "alert"}])
+    with pytest.raises(ValueError, match="action must be one of"):
+        parse_enforcement_policies(
+            [{"name": "x", "trigger": "quality_violation", "action": "invalid"}]
+        )
+    with pytest.raises(ValueError, match="duplicate enforcement policy name"):
+        parse_enforcement_policies(
+            [
+                {"name": "dup", "trigger": "manual", "action": "alert"},
+                {"name": "dup", "trigger": "manual", "action": "log_only"},
+            ]
+        )
+
+
+def test_parse_enforcement_mode_and_default_action() -> None:
+    assert parse_enforcement_mode("enforce") == "enforce"
+    assert parse_enforcement_default_action("alert") == "alert"
+    with pytest.raises(ValueError, match="enforcement_mode must be one of"):
+        parse_enforcement_mode("invalid")
+    with pytest.raises(ValueError, match="enforcement_default_action must be one of"):
+        parse_enforcement_default_action("invalid")
+
+
+def test_parse_struct_quality_rules_severity_and_enforcement_policy() -> None:
+    rules = parse_struct_quality_rules(
+        [
+            {
+                "metric": "freshness",
+                "threshold": "24",
+                "unit": "h",
+                "severity": "critical",
+                "businessImpact": "regulatory",
+                "enforcementPolicy": "freshness-block",
+            }
+        ]
+    )
+    assert rules[0]["severity"] == "critical"
+    assert rules[0]["business_impact"] == "regulatory"
+    assert rules[0]["enforcement_policy"] == "freshness-block"
+
+
+def test_build_data_contract_attributes_includes_enforcement() -> None:
+    policies = parse_enforcement_policies(
+        [{"name": "warn", "trigger": "sla_violation", "action": "alert"}]
+    )
+    attrs = build_data_contract_attributes(
+        qualified_name="c1@1.0",
+        contract_id="c1",
+        version="1.0",
+        status="active",
+        enforcement_policies=policies,
+        enforcement_default_action="alert",
+        enforcement_mode="monitor",
+        auto_mark_broken_on_critical=True,
+        ranger_service="cm_hive",
+    )
+    assert attrs["enforcement_policies"][0]["name"] == "warn"
+    assert attrs["enforcement_default_action"] == "alert"
+    assert attrs["enforcement_mode"] == "monitor"
+    assert attrs["auto_mark_broken_on_critical"] is True
+    assert attrs["ranger_service"] == "cm_hive"
 
 
 def test_build_qualified_name() -> None:
@@ -271,6 +361,62 @@ def test_create_data_contract_with_odcs_fields(atlas: AtlasClient, httpserver: H
     assert attrs["schema_properties"][0]["name"] == "id"
 
 
+def test_create_data_contract_with_enforcement_fields(
+    atlas: AtlasClient, httpserver: HTTPServer
+) -> None:
+    captured: dict = {}
+
+    def handler(request):
+        captured["body"] = json.loads(request.data.decode())
+        return Response(
+            json.dumps({"guidAssignments": {"-1": "guid-1"}}),
+            status=200,
+            mimetype="application/json",
+        )
+
+    httpserver.expect_request(
+        "/v2/entity/uniqueAttribute/type/data_contract",
+        method="GET",
+    ).respond_with_data("not found", status=404)
+    httpserver.expect_request("/v2/entity", method="POST").respond_with_handler(handler)
+    enforcement = [
+        {
+            "name": "freshness-block",
+            "trigger": "quality_violation",
+            "action": "block_and_alert",
+            "rule_filter": "freshness",
+            "notify_targets": ["#alerts"],
+        }
+    ]
+    quality = [
+        {
+            "metric": "freshness",
+            "threshold": "24",
+            "unit": "h",
+            "severity": "critical",
+            "enforcement_policy": "freshness-block",
+        }
+    ]
+    atlas.create_data_contract(
+        "c1",
+        "1.0",
+        "active",
+        quality=quality,
+        enforcement_policies=enforcement,
+        enforcement_mode="enforce",
+        enforcement_default_action="alert",
+        auto_mark_broken_on_critical=True,
+        ranger_service="cm_hive",
+    )
+    attrs = captured["body"]["entity"]["attributes"]
+    assert attrs["enforcement_mode"] == "enforce"
+    assert attrs["enforcement_default_action"] == "alert"
+    assert attrs["auto_mark_broken_on_critical"] is True
+    assert attrs["ranger_service"] == "cm_hive"
+    assert attrs["enforcement_policies"][0]["action"] == "block_and_alert"
+    assert attrs["quality"][0]["enforcement_policy"] == "freshness-block"
+
+
 def test_get_data_contract(atlas: AtlasClient, httpserver: HTTPServer) -> None:
     httpserver.expect_request(
         "/v2/entity/uniqueAttribute/type/data_contract",
@@ -322,6 +468,7 @@ def test_ensure_data_contract_typedef_upgrades(atlas: AtlasClient, httpserver: H
         "odcs_schema_object",
         "odcs_quality_rule",
         "odcs_sla_property",
+        "odcs_enforcement_policy",
     ):
         httpserver.expect_request(
             f"/v2/types/structdef/name/{struct_name}",

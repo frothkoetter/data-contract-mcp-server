@@ -11,6 +11,9 @@ from .client import AtlasClient
 from .config import ServerConfig
 from .data_contracts import (
     parse_consumers,
+    parse_enforcement_default_action,
+    parse_enforcement_mode,
+    parse_enforcement_policies,
     parse_quality_rules,
     parse_schema_objects,
     parse_struct_quality_rules,
@@ -560,12 +563,18 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         schema_objects: Optional[Any] = None,
         quality: Optional[Any] = None,
         sla_properties: Optional[Any] = None,
+        enforcement_policies: Optional[Any] = None,
+        enforcement_default_action: Optional[str] = None,
+        enforcement_mode: Optional[str] = None,
+        auto_mark_broken_on_critical: Optional[bool] = None,
+        ranger_service: Optional[str] = None,
     ) -> Dict[str, Any]:
         """Create or update a data_contract entity in Atlas. **WRITE OPERATION**
 
         Idempotent via qualifiedName (defaults to '{contract_id}@{version}').
-        Structured fields (`schema_objects`, `quality`, `sla_properties`, `quality_rules`, `tags`)
-        accept either a JSON array string OR a native JSON/list value (for CrewAI/agent callers).
+        Structured fields (`schema_objects`, `quality`, `sla_properties`, `quality_rules`, `tags`,
+        `enforcement_policies`) accept either a JSON array string OR a native JSON/list value
+        (for CrewAI/agent callers).
 
         Args:
             contract_id: Unique contract identifier (ODCS contract id).
@@ -588,6 +597,13 @@ def create_server(atlas: AtlasClient) -> FastMCP:
                 `column_name`, `data_type`, and `nullable` (NO/YES) are accepted in properties.
             quality: Structured quality rules (list or JSON string).
             sla_properties: SLA properties such as frequency/freshness (list or JSON string).
+            enforcement_policies: Violation handling policies (list or JSON string). Each policy
+                requires name, trigger (quality_violation|sla_violation|schema_drift|manual), and
+                action (alert|block_access|quarantine|escalate|mark_broken|...).
+            enforcement_default_action: Fallback action when no policy matches (default alert).
+            enforcement_mode: monitor|enforce|dry_run — whether policies are advisory or active.
+            auto_mark_broken_on_critical: Auto-set contract status to broken on critical violations.
+            ranger_service: Default Ranger service name (e.g. cm_hive) for block_access policies.
         """
         try:
             rules = parse_quality_rules(quality_rules)
@@ -611,6 +627,13 @@ def create_server(atlas: AtlasClient) -> FastMCP:
                     schema_objects=parse_schema_objects(schema_objects) or None,
                     quality=parse_struct_quality_rules(quality) or None,
                     sla_properties=parse_struct_sla_properties(sla_properties) or None,
+                    enforcement_policies=parse_enforcement_policies(enforcement_policies) or None,
+                    enforcement_default_action=parse_enforcement_default_action(
+                        enforcement_default_action
+                    ),
+                    enforcement_mode=parse_enforcement_mode(enforcement_mode),
+                    auto_mark_broken_on_critical=auto_mark_broken_on_critical,
+                    ranger_service=ranger_service,
                 )
             )
         except (ValueError, json.JSONDecodeError) as exc:
@@ -620,7 +643,8 @@ def create_server(atlas: AtlasClient) -> FastMCP:
                 "hint": (
                     "Structured fields accept a JSON array string OR a native list. "
                     "For schema, pass [{name, logicalType/object, properties:[{name, logicalType, ...}]}]. "
-                    "Use quality_rules for plain-text rules or quality for structured ODCS rules."
+                    "Use quality_rules for plain-text rules or quality for structured ODCS rules. "
+                    "Use enforcement_policies for violation handling (alert, block_access, quarantine, etc.)."
                 ),
             }
 

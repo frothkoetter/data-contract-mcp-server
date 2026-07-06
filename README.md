@@ -5,6 +5,7 @@ Model Context Protocol server for managing ODCS data contracts in Apache Atlas, 
 ## Features
 
 - **Knox authentication** — supports JWT tokens, raw cookies, and Basic Auth for CDP deployments
+- **ODCS Hybrid v2.3 contracts** — schema, quality, SLA, and enforcement policies stored as first-class Atlas attributes
 - **Read-mostly** — safe exploration of entities, lineage, types, and glossaries; a small set of write tools for tagging and labeling
 - **Automatic retries** — exponential backoff on transient errors
 
@@ -54,13 +55,126 @@ Model Context Protocol server for managing ODCS data contracts in Apache Atlas, 
 - `add_labels_to_entity(guid, labels)` — Add free-form labels (comma-separated)
 
 **Data contracts**
-- `ensure_data_contract_typedef()` — Register the `data_contract` entity and `datacontract_dataset_assignment` relationship in Atlas (run once)
+- `ensure_data_contract_typedef()` — Register or upgrade the `data_contract` entity (v2.3), struct types, and `datacontract_dataset_assignment` relationship in Atlas (run once)
 - `get_data_contract(contract_id?, version?, qualified_name?, ignore_relationships?)` — Fetch a contract with bound tables
 - `search_data_contracts(query?, status?, contract_id?, limit, offset, exclude_deleted)` — Search or list contracts
-- `create_data_contract(contract_id, version, status?, quality_rules?, qualified_name?)` — Create or update a contract (idempotent via qualifiedName)
+- `create_data_contract(...)` — Create or update a contract (idempotent via qualifiedName); see [Data contract model](#data-contract-model) below
 - `update_data_contract_status(status, contract_id?, version?, qualified_name?)` — Set contract status (e.g. `active`, `broken`)
 - `bind_contract_to_table(table_qualified_names, contract_id?, version?, qualified_name?, table_type?)` — Link contract to hive/iceberg tables
 - `delete_data_contract(contract_id?, version?, qualified_name?)` — Hard-delete a specific contract version
+
+## Data contract model
+
+Atlas entity type `data_contract` (Hybrid v2.3) stores ODCS contract metadata alongside derived search fields.
+
+| Field | Description |
+|-------|-------------|
+| `contractId`, `version`, `status` | Identity and lifecycle (`draft`, `active`, `broken`) |
+| `name`, `domain`, `data_product`, `tenant` | ODCS fundamentals |
+| `description_purpose`, `description_limitations` | Usage context |
+| `tags`, `consumer` | Labels and consumers (roles, groups, persons) |
+| `quality_rules` | Legacy plain-text rules |
+| `quality` | Structured ODCS quality rules (`metric`, `threshold`, `severity`, `enforcement_policy`, …) |
+| `sla_properties` | SLA properties (freshness, frequency, …) |
+| `schema_objects`, `schema_properties` | Schema with flattened columns for Atlas |
+| `enforcement_policies` | Violation handling policies (alert, block, quarantine, escalate, …) |
+| `enforcement_mode` | `monitor` \| `enforce` \| `dry_run` |
+| `enforcement_default_action` | Fallback action when no policy matches |
+| `auto_mark_broken_on_critical` | Flag for auto-setting `status=broken` on critical violations |
+| `ranger_service` | Default Ranger service (e.g. `cm_hive`) for access-block policies |
+| `odcs_document` | Full ODCS YAML/JSON blob |
+
+**Enforcement is declarative.** Policies are stored in Atlas; an external orchestrator (CDQ job, NiFi flow, custom service) reads them and executes actions such as Ranger deny policies, alerts, or quarantine routing. This MCP server does not call Ranger directly.
+
+### `create_data_contract` parameters
+
+```
+create_data_contract(
+  contract_id,                          # required
+  version,                              # required
+  status?,                              # default: draft
+  quality_rules?,                       # comma-separated, JSON array, or list
+  qualified_name?,                      # default: {contract_id}@{version}
+  name?, domain?, data_product?, tenant?,
+  description_purpose?, description_limitations?,
+  tags?, consumer?,                     # comma-separated, JSON array, or list
+  sla_default_element?,
+  odcs_document?,                       # full ODCS YAML/JSON string
+  schema_objects?,                      # list or JSON string
+  quality?,                             # structured ODCS quality rules
+  sla_properties?,                      # structured SLA properties
+  enforcement_policies?,                # list or JSON string
+  enforcement_default_action?,          # alert, block_access, quarantine, ...
+  enforcement_mode?,                    # monitor | enforce | dry_run
+  auto_mark_broken_on_critical?,
+  ranger_service?,                      # e.g. cm_hive
+)
+```
+
+Structured array fields (`schema_objects`, `quality`, `sla_properties`, `quality_rules`, `tags`, `consumer`, `enforcement_policies`) accept either a **JSON array string** or a **native list** (for agent callers).
+
+### Example: contract with quality and enforcement
+
+```json
+{
+  "contract_id": "orders-contract",
+  "version": "1.0",
+  "status": "active",
+  "name": "Orders Data Contract",
+  "domain": "sales",
+  "data_product": "orders",
+  "consumer": ["group:analysts", "group:risk-analytics"],
+  "enforcement_mode": "enforce",
+  "enforcement_default_action": "alert",
+  "auto_mark_broken_on_critical": true,
+  "ranger_service": "cm_hive",
+  "schema_objects": [{
+    "name": "orders",
+    "logicalType": "object",
+    "properties": [
+      {"name": "id", "logicalType": "string", "primaryKey": true},
+      {"name": "customer_email", "logicalType": "string"},
+      {"name": "updated_at", "logicalType": "date"}
+    ]
+  }],
+  "quality": [{
+    "metric": "freshness",
+    "threshold": "24",
+    "unit": "h",
+    "element": "orders.updated_at",
+    "severity": "critical",
+    "enforcement_policy": "freshness-block"
+  }],
+  "sla_properties": [{"property": "freshness", "value": "24", "unit": "h"}],
+  "enforcement_policies": [{
+    "name": "freshness-block",
+    "trigger": "quality_violation",
+    "action": "block_and_alert",
+    "rule_filter": "freshness",
+    "severity": "critical",
+    "notify_channel": "slack",
+    "notify_targets": ["#data-alerts"],
+    "ranger_policy_template": "deny_read"
+  }]
+}
+```
+
+### Enforcement policy actions
+
+| Action | Intended runtime behavior |
+|--------|---------------------------|
+| `log_only` | Record violation only |
+| `alert` | Notify via configured channel |
+| `mark_broken` | Set contract status to `broken` |
+| `block_access` | Apply Ranger deny policy on bound tables |
+| `quarantine` | Route failing rows to `quarantine_target` table |
+| `escalate` | Alert and escalate after `escalate_after_minutes` |
+| `block_and_alert` | Ranger block + notification |
+| `quarantine_and_alert` | Quarantine + notification |
+
+### Ranger column masking (external)
+
+Column masking and hashing use Ranger **masking policies** (`policyType: 1`), separate from access/deny policies. Map contract `schema_properties` and `consumer` groups to Ranger `dataMaskPolicyItems` with `dataMaskType` values such as `MASK_HASH`, `MASK_SHOW_LAST_4`, or `MASK_NULL`. See Apache Ranger masking docs for REST API details; execution is handled outside this MCP server.
 
 ## Setup
 
@@ -173,6 +287,10 @@ Once configured, you can ask Claude things like:
 - "Show me the audit history for entity guid abc-123"
 - "Search for all Kafka topics containing 'events'"
 - "Tag entity abc-123 as Confidential"
+- "Register the data contract typedef in Atlas"
+- "Create an ODCS data contract for orders with a freshness SLA and enforcement policy"
+- "List all active data contracts"
+- "Bind contract `orders-contract@1.0` to table `sales.orders@cluster`"
 
 ## License
 

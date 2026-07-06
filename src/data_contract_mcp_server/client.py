@@ -508,6 +508,11 @@ class AtlasClient:
         schema_objects: Optional[List[Dict[str, Any]]] = None,
         quality: Optional[List[Dict[str, Any]]] = None,
         sla_properties: Optional[List[Dict[str, Any]]] = None,
+        enforcement_policies: Optional[List[Dict[str, Any]]] = None,
+        enforcement_default_action: Optional[str] = None,
+        enforcement_mode: Optional[str] = None,
+        auto_mark_broken_on_critical: Optional[bool] = None,
+        ranger_service: Optional[str] = None,
     ) -> Dict[str, Any]:
         qn = qualified_name or build_qualified_name(contract_id, version)
         existing_attrs: Optional[Dict[str, Any]] = None
@@ -536,6 +541,11 @@ class AtlasClient:
             schema_objects=schema_objects,
             quality=quality,
             sla_properties=sla_properties,
+            enforcement_policies=enforcement_policies,
+            enforcement_default_action=enforcement_default_action,
+            enforcement_mode=enforcement_mode,
+            auto_mark_broken_on_critical=auto_mark_broken_on_critical,
+            ranger_service=ranger_service,
             existing_attrs=existing_attrs,
         )
         entity = {"typeName": DATA_CONTRACT_TYPE, "attributes": attributes}

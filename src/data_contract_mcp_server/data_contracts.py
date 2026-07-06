@@ -7,13 +7,31 @@ JsonArrayInput = Union[str, Sequence[Any], None]
 
 DATA_CONTRACT_TYPE = "data_contract"
 DATA_CONTRACT_RELATIONSHIP = "datacontract_dataset_assignment"
-DATA_CONTRACT_TYPE_VERSION = "2.2"
+DATA_CONTRACT_TYPE_VERSION = "2.3"
 SUPPORTED_TABLE_TYPES = frozenset({"hive_table", "iceberg_table"})
 
 STRUCT_SCHEMA_PROPERTY = "odcs_schema_property"
 STRUCT_SCHEMA_OBJECT = "odcs_schema_object"
 STRUCT_QUALITY_RULE = "odcs_quality_rule"
 STRUCT_SLA_PROPERTY = "odcs_sla_property"
+STRUCT_ENFORCEMENT_POLICY = "odcs_enforcement_policy"
+
+ENFORCEMENT_ACTIONS = frozenset(
+    {
+        "log_only",
+        "alert",
+        "mark_broken",
+        "block_access",
+        "quarantine",
+        "escalate",
+        "block_and_alert",
+        "quarantine_and_alert",
+    }
+)
+ENFORCEMENT_TRIGGERS = frozenset(
+    {"quality_violation", "sla_violation", "schema_drift", "manual"}
+)
+ENFORCEMENT_MODES = frozenset({"monitor", "enforce", "dry_run"})
 
 _ODCS_KEY_ALIASES: Dict[str, str] = {
     "businessName": "business_name",
@@ -33,6 +51,22 @@ _ODCS_KEY_ALIASES: Dict[str, str] = {
     "dataType": "physical_type",
     "data_type": "physical_type",
     "slaDefaultElement": "sla_default_element",
+    "businessImpact": "business_impact",
+    "enforcementPolicy": "enforcement_policy",
+    "ruleFilter": "rule_filter",
+    "notifyChannel": "notify_channel",
+    "notifyTargets": "notify_targets",
+    "escalateTo": "escalate_to",
+    "escalateAfterMinutes": "escalate_after_minutes",
+    "rangerService": "ranger_service",
+    "rangerPolicyName": "ranger_policy_name",
+    "rangerPolicyTemplate": "ranger_policy_template",
+    "rangerResourcePath": "ranger_resource_path",
+    "quarantineTarget": "quarantine_target",
+    "customConfig": "custom_config",
+    "enforcementMode": "enforcement_mode",
+    "enforcementDefaultAction": "enforcement_default_action",
+    "autoMarkBrokenOnCritical": "auto_mark_broken_on_critical",
 }
 
 _DATA_CONTRACT_PRESERVED_ATTRS = (
@@ -57,6 +91,11 @@ _DATA_CONTRACT_PRESERVED_ATTRS = (
     "schema_properties",
     "quality",
     "sla_properties",
+    "enforcement_policies",
+    "enforcement_default_action",
+    "enforcement_mode",
+    "auto_mark_broken_on_critical",
+    "ranger_service",
 )
 
 def _optional_attr(name: str, type_name: str) -> Dict[str, Any]:
@@ -108,7 +147,7 @@ DATA_CONTRACT_STRUCT_DEFS = [
     {
         "name": STRUCT_QUALITY_RULE,
         "description": "ODCS data quality rule",
-        "typeVersion": "1.0",
+        "typeVersion": "1.1",
         "attributeDefs": [
             _optional_attr("rule_type", "string"),
             _optional_attr("metric", "string"),
@@ -119,6 +158,9 @@ DATA_CONTRACT_STRUCT_DEFS = [
             _optional_attr("element", "string"),
             _optional_attr("query", "string"),
             _optional_attr("engine", "string"),
+            _optional_attr("severity", "string"),
+            _optional_attr("business_impact", "string"),
+            _optional_attr("enforcement_policy", "string"),
         ],
     },
     {
@@ -132,6 +174,29 @@ DATA_CONTRACT_STRUCT_DEFS = [
             _optional_attr("unit", "string"),
             _optional_attr("element", "string"),
             _optional_attr("driver", "string"),
+        ],
+    },
+    {
+        "name": STRUCT_ENFORCEMENT_POLICY,
+        "description": "Contract violation enforcement policy",
+        "typeVersion": "1.0",
+        "attributeDefs": [
+            _required_attr("name", "string"),
+            _required_attr("trigger", "string"),
+            _required_attr("action", "string"),
+            _optional_attr("severity", "string"),
+            _optional_attr("rule_filter", "string"),
+            _optional_attr("enabled", "boolean"),
+            _optional_attr("notify_channel", "string"),
+            _optional_attr("notify_targets", "string"),
+            _optional_attr("escalate_to", "string"),
+            _optional_attr("escalate_after_minutes", "string"),
+            _optional_attr("ranger_service", "string"),
+            _optional_attr("ranger_policy_name", "string"),
+            _optional_attr("ranger_policy_template", "string"),
+            _optional_attr("ranger_resource_path", "string"),
+            _optional_attr("quarantine_target", "string"),
+            _optional_attr("custom_config", "string"),
         ],
     },
 ]
@@ -194,6 +259,16 @@ _DATA_CONTRACT_V2_ATTRS: List[Dict[str, Any]] = [
         "isOptional": True,
         "cardinality": "SET",
     },
+    {
+        "name": "enforcement_policies",
+        "typeName": f"array<{STRUCT_ENFORCEMENT_POLICY}>",
+        "isOptional": True,
+        "cardinality": "SET",
+    },
+    _optional_attr("enforcement_default_action", "string"),
+    _optional_attr("enforcement_mode", "string"),
+    _optional_attr("auto_mark_broken_on_critical", "boolean"),
+    _optional_attr("ranger_service", "string"),
 ]
 
 DATA_CONTRACT_TYPEDEF: Dict[str, Any] = {
@@ -451,6 +526,87 @@ def parse_struct_sla_properties(sla_properties: JsonArrayInput) -> List[Dict[str
     return result
 
 
+def _comma_separated_field(value: Any, field_name: str) -> Optional[str]:
+    if value is None:
+        return None
+    if isinstance(value, list):
+        parts = [str(item).strip() for item in value if str(item).strip()]
+        return ", ".join(parts) if parts else None
+    if isinstance(value, str):
+        stripped = value.strip()
+        return stripped or None
+    raise ValueError(f"{field_name} must be a comma-separated string or list of strings")
+
+
+def parse_enforcement_policies(enforcement_policies: JsonArrayInput) -> List[Dict[str, Any]]:
+    items = coerce_json_array(enforcement_policies, "enforcement_policies")
+    result: List[Dict[str, Any]] = []
+    seen_names: set[str] = set()
+    for item in items:
+        if not isinstance(item, Mapping):
+            raise ValueError("enforcement_policies entries must be JSON objects")
+        normalized = _normalize_mapping(item)
+        name = str(normalized.get("name", "")).strip()
+        if not name:
+            raise ValueError("each enforcement policy requires a name")
+        if name in seen_names:
+            raise ValueError(f"duplicate enforcement policy name: {name}")
+        seen_names.add(name)
+
+        trigger = str(normalized.get("trigger", "")).strip().lower()
+        if trigger not in ENFORCEMENT_TRIGGERS:
+            allowed = ", ".join(sorted(ENFORCEMENT_TRIGGERS))
+            raise ValueError(f"enforcement policy trigger must be one of: {allowed}")
+        normalized["trigger"] = trigger
+
+        action = str(normalized.get("action", "")).strip().lower()
+        if action not in ENFORCEMENT_ACTIONS:
+            allowed = ", ".join(sorted(ENFORCEMENT_ACTIONS))
+            raise ValueError(f"enforcement policy action must be one of: {allowed}")
+        normalized["action"] = action
+
+        if "severity" in normalized and normalized["severity"] is not None:
+            normalized["severity"] = str(normalized["severity"]).strip().lower()
+
+        for field in ("notify_targets", "escalate_to"):
+            if field in normalized:
+                normalized[field] = _comma_separated_field(normalized[field], field)
+
+        if "escalate_after_minutes" in normalized and normalized["escalate_after_minutes"] is not None:
+            normalized["escalate_after_minutes"] = str(normalized["escalate_after_minutes"]).strip()
+
+        if "enabled" in normalized and normalized["enabled"] is not None:
+            if not isinstance(normalized["enabled"], bool):
+                raise ValueError("enforcement policy enabled must be a boolean")
+
+        result.append(normalized)
+    return result
+
+
+def parse_enforcement_mode(mode: Optional[str]) -> Optional[str]:
+    if mode is None:
+        return None
+    normalized = str(mode).strip().lower()
+    if not normalized:
+        return None
+    if normalized not in ENFORCEMENT_MODES:
+        allowed = ", ".join(sorted(ENFORCEMENT_MODES))
+        raise ValueError(f"enforcement_mode must be one of: {allowed}")
+    return normalized
+
+
+def parse_enforcement_default_action(action: Optional[str]) -> Optional[str]:
+    if action is None:
+        return None
+    normalized = str(action).strip().lower()
+    if not normalized:
+        return None
+    if normalized not in ENFORCEMENT_ACTIONS:
+        allowed = ", ".join(sorted(ENFORCEMENT_ACTIONS))
+        raise ValueError(f"enforcement_default_action must be one of: {allowed}")
+    return normalized
+
+
 def flatten_schema_for_atlas(
     schema_objects: List[Mapping[str, Any]],
 ) -> tuple[List[Dict[str, Any]], List[Dict[str, Any]]]:
@@ -515,7 +671,7 @@ def derive_freshness_quality_threshold(quality: List[Mapping[str, Any]]) -> Opti
 
 
 _STRUCT_ARRAY_ATTRS = frozenset(
-    {"schema_objects", "schema_properties", "quality", "sla_properties"}
+    {"schema_objects", "schema_properties", "quality", "sla_properties", "enforcement_policies"}
 )
 
 
@@ -570,6 +726,11 @@ def build_data_contract_attributes(
     schema_objects: Optional[List[Dict[str, Any]]] = None,
     quality: Optional[List[Dict[str, Any]]] = None,
     sla_properties: Optional[List[Dict[str, Any]]] = None,
+    enforcement_policies: Optional[List[Dict[str, Any]]] = None,
+    enforcement_default_action: Optional[str] = None,
+    enforcement_mode: Optional[str] = None,
+    auto_mark_broken_on_critical: Optional[bool] = None,
+    ranger_service: Optional[str] = None,
     existing_attrs: Optional[Mapping[str, Any]] = None,
 ) -> Dict[str, Any]:
     if existing_attrs:
@@ -596,6 +757,9 @@ def build_data_contract_attributes(
         "description_limitations": description_limitations,
         "sla_default_element": sla_default_element,
         "odcs_document": odcs_document,
+        "enforcement_default_action": enforcement_default_action,
+        "enforcement_mode": enforcement_mode,
+        "ranger_service": ranger_service,
     }
     for key, value in optional_strings.items():
         if value is not None:
@@ -622,6 +786,10 @@ def build_data_contract_attributes(
         freshness_sla = derive_freshness_sla(sla_properties)
         if freshness_sla:
             attributes["freshness_sla"] = freshness_sla
+    if enforcement_policies is not None:
+        attributes["enforcement_policies"] = enforcement_policies
+    if auto_mark_broken_on_critical is not None:
+        attributes["auto_mark_broken_on_critical"] = auto_mark_broken_on_critical
 
     return attributes
 
