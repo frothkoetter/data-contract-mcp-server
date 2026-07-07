@@ -14,6 +14,7 @@ from .data_contracts import (
     build_entity_typedef_upgrade,
     build_struct_typedef_upgrade,
     build_qualified_name,
+    data_contract_typedef_status,
     parse_quality_rules,
     parse_table_bindings,
     preserve_contract_attributes,
@@ -399,12 +400,13 @@ class AtlasClient:
         entity_mutation = self.update_typedefs(
             {"entityDefs": [build_entity_typedef_upgrade(current)]}
         )
+        updated = self.get_entity_type_def(DATA_CONTRACT_TYPE)
         return {
             "status": "upgraded",
             "typeName": DATA_CONTRACT_TYPE,
-            "typeVersion": DATA_CONTRACT_TYPE_VERSION,
             "struct_mutation": struct_mutation,
             "entity_mutation": entity_mutation,
+            **data_contract_typedef_status(updated),
         }
 
     def ensure_data_contract_typedef(self) -> Dict[str, Any]:
@@ -415,13 +417,19 @@ class AtlasClient:
             return {
                 "status": "exists",
                 "typeName": DATA_CONTRACT_TYPE,
-                "typeVersion": existing.get("typeVersion"),
+                **data_contract_typedef_status(existing),
             }
         except AtlasError as exc:
             if exc.status_code != 404:
                 raise
             try:
-                return self.register_typedefs(DATA_CONTRACT_TYPEDEF)
+                created = self.register_typedefs(DATA_CONTRACT_TYPEDEF)
+                return {
+                    **created,
+                    "status": "created",
+                    "typeName": DATA_CONTRACT_TYPE,
+                    **data_contract_typedef_status(DATA_CONTRACT_TYPEDEF["entityDefs"][0]),
+                }
             except AtlasError as create_exc:
                 if create_exc.status_code == 409:
                     return self.upgrade_data_contract_typedef()

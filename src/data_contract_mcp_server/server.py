@@ -480,10 +480,12 @@ def create_server(atlas: AtlasClient) -> FastMCP:
 
     @app.tool()
     async def ensure_data_contract_typedef() -> Dict[str, Any]:
-        """Register the data_contract entity and relationship typedefs in Atlas. **WRITE OPERATION**
+        """Register or upgrade the data_contract entity and relationship typedefs in Atlas. **WRITE OPERATION**
 
-        Idempotent: returns status 'exists' if the type is already registered, otherwise creates it.
-        Must be run once before using the other data contract tools.
+        Idempotent: adds missing struct defs and entity attributes (currently v2.3, including
+        enforcement_policies). Returns status 'exists' only when Atlas matches the full code schema;
+        check missingAttributes in the response. Use get_entity_type_definition('data_contract')
+        to inspect the live Atlas typedef after running this.
         """
         return _redact(atlas.ensure_data_contract_typedef())
 

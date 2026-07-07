@@ -25,6 +25,7 @@ from data_contract_mcp_server.data_contracts import (
     parse_struct_quality_rules,
     parse_struct_sla_properties,
     parse_table_bindings,
+    data_contract_typedef_status,
     typedef_needs_upgrade,
 )
 
@@ -288,6 +289,19 @@ def test_typedef_needs_upgrade() -> None:
     ) is False
 
 
+def test_data_contract_typedef_status_reports_missing_enforcement_fields() -> None:
+    status = data_contract_typedef_status(
+        {
+            "typeVersion": "2.2",
+            "attributeDefs": [{"name": "contractId"}, {"name": "status"}, {"name": "version"}],
+        }
+    )
+    assert status["needsUpgrade"] is True
+    assert status["expectedTypeVersion"] == DATA_CONTRACT_TYPE_VERSION
+    assert "enforcement_policies" in status["missingAttributes"]
+    assert "ranger_service" in status["missingAttributes"]
+
+
 def test_build_entity_typedef_upgrade_preserves_super_types() -> None:
     existing = {
         "name": "data_contract",
@@ -457,6 +471,7 @@ def test_ensure_data_contract_typedef_exists(atlas: AtlasClient, httpserver: HTT
     )
     result = atlas.ensure_data_contract_typedef()
     assert result["status"] == "exists"
+    assert result["missingAttributes"] == []
 
 
 def test_ensure_data_contract_typedef_upgrades(atlas: AtlasClient, httpserver: HTTPServer) -> None:
@@ -485,14 +500,15 @@ def test_ensure_data_contract_typedef_upgrades(atlas: AtlasClient, httpserver: H
 
 
 def test_ensure_data_contract_typedef_creates(atlas: AtlasClient, httpserver: HTTPServer) -> None:
-    httpserver.expect_request("/v2/types/entitydef/name/data_contract", method="GET").respond_with_data(
-        "not found", status=404
-    )
+    httpserver.expect_request(
+        "/v2/types/entitydef/name/data_contract", method="GET"
+    ).respond_with_data("not found", status=404)
     httpserver.expect_request("/v2/types/typedefs", method="POST").respond_with_json(
         {"entityDefs": [{"name": "data_contract"}]}
     )
     result = atlas.ensure_data_contract_typedef()
-    assert "entityDefs" in result
+    assert result["status"] == "created"
+    assert result["missingAttributes"] == []
 
 
 def test_atlas_struct_array_to_writer() -> None:

@@ -365,6 +365,20 @@ def typedef_needs_upgrade(existing_def: Mapping[str, Any]) -> bool:
     return not required_names.issubset(existing_names)
 
 
+def data_contract_typedef_status(existing_def: Mapping[str, Any]) -> Dict[str, Any]:
+    """Summarize how the live Atlas typedef compares to the code-defined schema."""
+    existing_names = {attr["name"] for attr in existing_def.get("attributeDefs") or []}
+    required_names = {attr["name"] for attr in _DATA_CONTRACT_V2_ATTRS}
+    return {
+        "typeVersion": existing_def.get("typeVersion"),
+        "expectedTypeVersion": DATA_CONTRACT_TYPE_VERSION,
+        "attributeCount": len(existing_names),
+        "expectedAttributeCount": len(required_names),
+        "missingAttributes": sorted(required_names - existing_names),
+        "needsUpgrade": typedef_needs_upgrade(existing_def),
+    }
+
+
 def _version_key(version: str) -> tuple[int, ...]:
     parts: List[int] = []
     for piece in version.split("."):
