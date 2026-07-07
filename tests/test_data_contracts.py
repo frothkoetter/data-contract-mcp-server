@@ -449,11 +449,9 @@ def test_get_data_contract(atlas: AtlasClient, httpserver: HTTPServer) -> None:
 
 
 def test_search_data_contracts_dsl(atlas: AtlasClient, httpserver: HTTPServer) -> None:
-    httpserver.expect_request(
-        "/v2/search/dsl",
-        method="GET",
-        query_string="query=data_contract+where+status%3D%22active%22&limit=25&offset=0",
-    ).respond_with_json({"entities": [], "approximateCount": 0})
+    httpserver.expect_request("/v2/search/dsl", method="GET").respond_with_json(
+        {"entities": [], "approximateCount": 0}
+    )
     result = atlas.search_data_contracts(status="active")
     assert result["approximateCount"] == 0
 

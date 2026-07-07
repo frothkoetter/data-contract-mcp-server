@@ -1,10 +1,6 @@
 from __future__ import annotations
 
-<<<<<<< HEAD:src/data_contract_mcp_server/server.py
 import json
-import os
-=======
->>>>>>> 7396cedc130d63a2b1c387b56aa60f315d52ad4e:src/atlas_mcp_server/server.py
 from typing import Any, Dict, List, Optional
 
 import anyio
@@ -50,7 +46,6 @@ def _redact(obj: Any, max_items: int = 200) -> Any:
 
 def build_client(config: ServerConfig) -> AtlasClient:
     verify = config.build_verify()
-    base_url = config.build_atlas_base()
     auth = AtlasAuthFactory(
         user=config.atlas_user,
         password=config.atlas_password,
@@ -58,10 +53,9 @@ def build_client(config: ServerConfig) -> AtlasClient:
     )
     session = auth.build_session()
     return AtlasClient(
-        config.build_atlas_base(),
+        config.build_atlas_api_root(),
         session,
         timeout_seconds=config.timeout_seconds,
-        api_root_url=config.build_atlas_api_root(),
     )
 
 
@@ -103,7 +97,7 @@ def create_server(atlas: AtlasClient) -> FastMCP:
 
         Args:
             query: Search string. Use '*' to match all entities.
-            type_name: Filter by entity type (e.g. 'hive_table', 'hdfs_path', 'kafka_topic').
+            type_name: Filter by entity type (e.g. 'hive_table', 'iceberg_table', 'hdfs_path').
             classification: Filter by classification/tag name.
             limit: Maximum results to return (default 25, max 1000).
             offset: Pagination offset.
@@ -166,6 +160,7 @@ def create_server(atlas: AtlasClient) -> FastMCP:
           - query='hive_table'                    → same, via DSL query string
           - query='hive_table where name="sales"' → Hive table named "sales"
           - query='hive_table where db.name="default"' → tables in the default database
+          - query='iceberg_table where db.name="analytics" and name="sales"' → Iceberg table
           - type_name='hive_table', classification='PII' → tagged Hive tables
           - query='Column where dataType="string"' → all string columns
 
@@ -185,6 +180,46 @@ def create_server(atlas: AtlasClient) -> FastMCP:
                 classification=classification,
                 limit=limit,
                 offset=offset,
+            )
+        )
+
+    @app.tool()
+    async def search_tables(
+        table_name: Optional[str] = None,
+        database_name: Optional[str] = None,
+        query: Optional[str] = None,
+        table_types: Optional[List[str]] = None,
+        limit: int = 25,
+        offset: int = 0,
+        exclude_deleted: bool = True,
+    ) -> Dict[str, Any]:
+        """Find Hive and Iceberg tables in Atlas by database/name or free-text query.
+
+        Searches both hive_table and iceberg_table by default. In CDP, Iceberg tables are
+        often registered as iceberg_table — basic search with type_name='hive_table' alone
+        will miss them.
+
+        Args:
+            table_name: Table name (e.g. 'mart_portfolio_risk_summary').
+            database_name: Database/catalog name (e.g. 'buba_risk_analytics').
+            query: Optional free-text query passed to basic search per table type.
+            table_types: Entity types to search (default: hive_table and iceberg_table).
+            limit: Maximum results (default 25).
+            offset: Pagination offset.
+            exclude_deleted: Exclude deleted entities (default true).
+
+        Example:
+            search_tables(database_name='buba_risk_analytics', table_name='mart_portfolio_risk_summary')
+        """
+        return _redact(
+            atlas.search_tables(
+                table_name=table_name,
+                database_name=database_name,
+                query=query,
+                table_types=table_types,
+                limit=limit,
+                offset=offset,
+                exclude_deleted=exclude_deleted,
             )
         )
 
@@ -252,7 +287,7 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         Pass the unique attribute as attr:{name} query param, e.g. attr:qualifiedName=value.
 
         Args:
-            type_name: Entity type name (e.g. 'hive_table').
+            type_name: Entity type name (e.g. 'hive_table', 'iceberg_table').
             attr_name: Unique attribute name — typically 'qualifiedName'.
             attr_value: The attribute value (e.g. 'default.sales_data@cluster1').
             ignore_relationships: If true, skip relationship details.
@@ -411,7 +446,7 @@ def create_server(atlas: AtlasClient) -> FastMCP:
         """Get data lineage using a unique attribute instead of GUID.
 
         Args:
-            type_name: Entity type name (e.g. 'hive_table').
+            type_name: Entity type name (e.g. 'hive_table', 'iceberg_table').
             attr_name: Unique attribute name — typically 'qualifiedName'.
             attr_value: The attribute value.
             direction: 'INPUT', 'OUTPUT', or 'BOTH' (default).

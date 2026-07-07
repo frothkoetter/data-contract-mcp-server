@@ -30,44 +30,6 @@ wheels = [
 ]
 
 [[package]]
-<<<<<<< HEAD
-=======
-name = "atlas-mcp-server"
-version = "0.1.0"
-source = { editable = "." }
-dependencies = [
-    { name = "anyio" },
-    { name = "mcp" },
-    { name = "python-dotenv" },
-    { name = "requests" },
-    { name = "tenacity" },
-]
-
-[package.dev-dependencies]
-dev = [
-    { name = "pytest" },
-    { name = "pytest-httpserver" },
-    { name = "ruff" },
-]
-
-[package.metadata]
-requires-dist = [
-    { name = "anyio", specifier = ">=4.4.0" },
-    { name = "mcp", specifier = ">=1.1.2" },
-    { name = "python-dotenv", specifier = ">=1.0.0" },
-    { name = "requests", specifier = ">=2.32.3" },
-    { name = "tenacity", specifier = ">=9.0.0" },
-]
-
-[package.metadata.requires-dev]
-dev = [
-    { name = "pytest", specifier = ">=8.2.0" },
-    { name = "pytest-httpserver", specifier = ">=1.0.10" },
-    { name = "ruff", specifier = ">=0.6.0" },
-]
-
-[[package]]
->>>>>>> 7396cedc130d63a2b1c387b56aa60f315d52ad4e
 name = "attrs"
 version = "26.1.0"
 source = { registry = "https://pypi.org/simple" }
@@ -357,6 +319,7 @@ source = { editable = "." }
 dependencies = [
     { name = "anyio" },
     { name = "mcp" },
+    { name = "python-dotenv" },
     { name = "requests" },
     { name = "tenacity" },
 ]
@@ -372,6 +335,7 @@ dev = [
 requires-dist = [
     { name = "anyio", specifier = ">=4.4.0" },
     { name = "mcp", specifier = ">=1.1.2" },
+    { name = "python-dotenv", specifier = ">=1.0.0" },
     { name = "requests", specifier = ">=2.32.3" },
     { name = "tenacity", specifier = ">=9.0.0" },
 ]

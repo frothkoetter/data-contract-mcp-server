@@ -39,6 +39,8 @@ class AtlasError(Exception):
 
 _RETRYABLE = (AtlasError, requests.ConnectionError, requests.Timeout)
 
+TABLE_ENTITY_TYPES = ("hive_table", "iceberg_table")
+
 
 class AtlasClient:
     def __init__(self, base_url: str, session: requests.Session, timeout_seconds: int = 30):
@@ -152,14 +154,131 @@ class AtlasClient:
 
     def search_dsl(
         self,
-        query: str,
+        query: Optional[str] = None,
+        type_name: Optional[str] = None,
+        classification: Optional[str] = None,
         limit: int = 25,
         offset: int = 0,
     ) -> Dict[str, Any]:
-        return self._get(
-            "search/dsl",
-            params={"query": query, "limit": limit, "offset": offset},
-        )
+        params: Dict[str, Any] = {"limit": limit, "offset": offset}
+        if query is not None:
+            params["query"] = query
+        if type_name is not None:
+            params["typeName"] = type_name
+        if classification is not None:
+            params["classification"] = classification
+        return self._get("search/dsl", params=params)
+
+    def _summarize_table_entity(self, entity: Dict[str, Any]) -> Dict[str, Any]:
+        attrs = entity.get("attributes") or {}
+        db = attrs.get("db") or {}
+        db_name = db.get("qualifiedName") or db.get("name") if isinstance(db, dict) else None
+        return {
+            "guid": entity.get("guid"),
+            "typeName": entity.get("typeName"),
+            "name": attrs.get("name"),
+            "qualifiedName": attrs.get("qualifiedName"),
+            "database": db_name,
+            "status": entity.get("status"),
+        }
+
+    def search_tables(
+        self,
+        table_name: Optional[str] = None,
+        database_name: Optional[str] = None,
+        query: Optional[str] = None,
+        table_types: Optional[List[str]] = None,
+        limit: int = 25,
+        offset: int = 0,
+        exclude_deleted: bool = True,
+    ) -> Dict[str, Any]:
+        """Find hive_table and iceberg_table entities by database/name or free-text query."""
+        types = list(table_types or TABLE_ENTITY_TYPES)
+        unsupported = set(types) - set(TABLE_ENTITY_TYPES)
+        if unsupported:
+            supported = ", ".join(TABLE_ENTITY_TYPES)
+            raise ValueError(f"Unsupported table_types {sorted(unsupported)}. Use: {supported}")
+
+        results: List[Dict[str, Any]] = []
+        seen_guids: set[str] = set()
+        strategies: List[str] = []
+
+        def _add_entities(entities: List[Dict[str, Any]], strategy: str) -> None:
+            for entity in entities:
+                guid = entity.get("guid")
+                if not guid or guid in seen_guids:
+                    continue
+                seen_guids.add(guid)
+                results.append(self._summarize_table_entity(entity))
+                strategies.append(strategy)
+                if len(results) >= limit:
+                    return
+
+        if database_name and table_name:
+            for type_name in types:
+                dsl = (
+                    f'{type_name} where db.name="{database_name}" and name="{table_name}"'
+                )
+                try:
+                    response = self.search_dsl(query=dsl, limit=limit, offset=offset)
+                    _add_entities(response.get("entities") or [], f"dsl:{dsl}")
+                except AtlasError:
+                    continue
+                if len(results) >= limit:
+                    break
+        elif table_name and len(results) < limit:
+            for type_name in types:
+                dsl = f'{type_name} where name="{table_name}"'
+                try:
+                    response = self.search_dsl(query=dsl, limit=limit, offset=offset)
+                    _add_entities(response.get("entities") or [], f"dsl:{dsl}")
+                except AtlasError:
+                    continue
+                if len(results) >= limit:
+                    break
+
+        search_query = query or (table_name if not database_name else None)
+        if search_query and len(results) < limit:
+            for type_name in types:
+                response = self.search_basic(
+                    query=search_query,
+                    type_name=type_name,
+                    limit=limit,
+                    offset=offset,
+                    exclude_deleted=exclude_deleted,
+                )
+                _add_entities(
+                    response.get("entities") or [],
+                    f"basic:{type_name}:{search_query}",
+                )
+                if len(results) >= limit:
+                    break
+
+        if not results and not search_query and not table_name:
+            for type_name in types:
+                response = self.search_basic(
+                    query="*",
+                    type_name=type_name,
+                    limit=limit,
+                    offset=offset,
+                    exclude_deleted=exclude_deleted,
+                )
+                _add_entities(response.get("entities") or [], f"browse:{type_name}")
+                if len(results) >= limit:
+                    break
+
+        return {
+            "entities": results[:limit],
+            "count": len(results[:limit]),
+            "searchedTypes": types,
+            "strategies": list(dict.fromkeys(strategies)),
+            "deletedCount": sum(1 for entity in results[:limit] if entity.get("status") == "DELETED"),
+            "hint": (
+                "Iceberg tables are often registered as iceberg_table, not hive_table. "
+                "Use qualifiedName from results with bind_contract_to_table and the matching table_type. "
+                "If all matches are DELETED, set exclude_deleted=false or re-import the table into Atlas."
+            ),
+        }
 
     def search_by_classification(
         self,
