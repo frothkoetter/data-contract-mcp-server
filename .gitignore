@@ -35,6 +35,8 @@ htmlcov/
 # Environment and secrets
 .env
 .env.*
+mcp.json
+.cursor/mcp.json
 
 # IDE / editor
 .idea/
