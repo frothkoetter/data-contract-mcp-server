@@ -2,28 +2,25 @@ from __future__ import annotations
 
 import os
 from dataclasses import dataclass
+from pathlib import Path
 from typing import Optional
+
+from dotenv import load_dotenv
+
+# Load project .env before dataclass defaults read os.environ (at import time).
+_project_root = Path(__file__).resolve().parents[2]
+load_dotenv(_project_root / ".env")
 
 
 @dataclass
 class ServerConfig:
-    # Transport: stdio (default), http, sse
-    transport: str = os.getenv("MCP_TRANSPORT", "stdio")
-    host: str = os.getenv("MCP_HOST", "127.0.0.1")
-    port: int = int(os.getenv("MCP_PORT", "3030"))
-
     # Atlas via Knox — full CDP gateway URL including the Atlas API path
     # Example: ATLAS_GATEWAY_URL=https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/
     atlas_gateway_url: str = os.getenv("ATLAS_GATEWAY_URL", "")
 
-    # Auth — simple Basic Auth (Knox proxies it through)
+    # Auth — Basic Auth (Knox proxies credentials through)
     atlas_user: Optional[str] = os.getenv("ATLAS_USER")
     atlas_password: Optional[str] = os.getenv("ATLAS_PASS")
-
-    # Knox JWT token as alternative to basic auth
-    knox_token: Optional[str] = os.getenv("KNOX_TOKEN")
-    # Raw cookie string (highest priority)
-    knox_cookie: Optional[str] = os.getenv("KNOX_COOKIE")
 
     # TLS/HTTP
     verify_ssl_env: str = os.getenv("ATLAS_VERIFY_SSL", "true").lower()
@@ -36,10 +33,13 @@ class ServerConfig:
             return self.ca_bundle
         return self.verify_ssl_env not in {"0", "false", "no"}
 
-    def build_atlas_base(self) -> str:
+    def build_atlas_api_root(self) -> str:
         if not self.atlas_gateway_url:
             raise ValueError(
                 "ATLAS_GATEWAY_URL must be set.\n"
                 "Example: ATLAS_GATEWAY_URL=https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/"
             )
-        return self.atlas_gateway_url.rstrip("/")
+        return self.atlas_gateway_url.rstrip("/").removesuffix("/v2")
+
+    def build_atlas_base(self) -> str:
+        return f"{self.build_atlas_api_root()}/v2"

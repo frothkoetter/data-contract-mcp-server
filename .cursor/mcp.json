@@ -1,0 +1,10 @@
+{
+  "mcpServers": {
+    "atlas-mcp-server": {
+      "type": "stdio",
+      "command": "uv",
+      "args": ["--directory", "${workspaceFolder}", "run", "run-server"],
+      "envFile": ".env"
+    }
+  }
+}
