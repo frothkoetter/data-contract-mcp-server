@@ -159,6 +159,50 @@ Structured array fields (`schema_objects`, `quality`, `sla_properties`, `quality
 }
 ```
 
+### Example: ODCS column completeness check
+
+Pass column-level rules in the **`quality`** array (not `quality_rules`). Link enforcement via
+`enforcement_policy` (rule reference) and a matching entry in `enforcement_policies`:
+
+```json
+{
+  "contract_id": "mart-portfolio-risk",
+  "version": "1.0",
+  "status": "active",
+  "name": "Mart Portfolio Risk Contract",
+  "domain": "buba_risk_analytics",
+  "ranger_service": "cm_hive",
+  "schema_objects": [{
+    "name": "mart_portfolio_risk_summary",
+    "logicalType": "object",
+    "properties": [
+      {"name": "reporting_bank_bic", "logicalType": "string", "required": true}
+    ]
+  }],
+  "quality": [{
+    "name": "DQ_NOT_NULL_reporting_bank_bic",
+    "description": "Ensure reporting_bank_bic is not null for all records.",
+    "rule_type": "completeness",
+    "metric": "not_null_count",
+    "query": "SELECT COUNT(*) FROM mart_portfolio_risk_summary WHERE reporting_bank_bic IS NULL",
+    "threshold": 0,
+    "severity": "critical",
+    "enforcement_policy": "block_access_on_violation",
+    "business_impact": "Null BIC codes prevent correct bank-level aggregation and reporting.",
+    "element": "reporting_bank_bic"
+  }],
+  "enforcement_policies": [{
+    "name": "block_access_on_violation",
+    "trigger": "quality_violation",
+    "action": "block_access",
+    "rule_filter": "DQ_NOT_NULL_reporting_bank_bic",
+    "severity": "critical"
+  }]
+}
+```
+
+CamelCase ODCS keys (`ruleType`, `businessImpact`, `enforcementPolicy`) are also accepted.
+
 ### Enforcement policy actions
 
 | Action | Intended runtime behavior |

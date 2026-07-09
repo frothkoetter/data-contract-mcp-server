@@ -86,6 +86,37 @@ def test_parse_enforcement_mode_and_default_action() -> None:
         parse_enforcement_default_action("invalid")
 
 
+def test_parse_struct_quality_rules_odcs_column_completeness() -> None:
+    rules = parse_struct_quality_rules(
+        [
+            {
+                "name": "DQ_NOT_NULL_reporting_bank_bic",
+                "description": "Ensure reporting_bank_bic is not null for all records.",
+                "rule_type": "completeness",
+                "metric": "not_null_count",
+                "query": (
+                    "SELECT COUNT(*) FROM mart_portfolio_risk_summary "
+                    "WHERE reporting_bank_bic IS NULL"
+                ),
+                "threshold": 0,
+                "severity": "critical",
+                "enforcement_policy": "block_access_on_violation",
+                "business_impact": (
+                    "Null BIC codes prevent correct bank-level aggregation and reporting."
+                ),
+                "element": "reporting_bank_bic",
+            }
+        ]
+    )
+    rule = rules[0]
+    assert rule["name"] == "DQ_NOT_NULL_reporting_bank_bic"
+    assert rule["rule_type"] == "completeness"
+    assert rule["metric"] == "not_null_count"
+    assert rule["threshold"] == "0"
+    assert rule["element"] == "reporting_bank_bic"
+    assert rule["enforcement_policy"] == "block_access_on_violation"
+
+
 def test_parse_struct_quality_rules_severity_and_enforcement_policy() -> None:
     rules = parse_struct_quality_rules(
         [

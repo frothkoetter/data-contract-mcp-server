@@ -735,7 +735,9 @@ def create_server(atlas: AtlasClient) -> FastMCP:
             odcs_document: Full ODCS contract as YAML or JSON string.
             schema_objects: Schema objects with nested properties (list or JSON string). Column aliases
                 `column_name`, `data_type`, and `nullable` (NO/YES) are accepted in properties.
-            quality: Structured quality rules (list or JSON string).
+            quality: Structured ODCS quality rules (list or JSON string). Use for column checks,
+                e.g. rule_type=completeness, metric=not_null_count, element=<column>, query=<SQL>,
+                threshold, severity, enforcement_policy (name referencing enforcement_policies).
             sla_properties: SLA properties such as frequency/freshness (list or JSON string).
             enforcement_policies: Violation handling policies (list or JSON string). Each policy
                 requires name, trigger (quality_violation|sla_violation|schema_drift|manual), and
