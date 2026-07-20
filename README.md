@@ -15,6 +15,7 @@ Model Context Protocol server for managing ODCS data contracts in Apache Atlas, 
 - `get_atlas_status()` — Server health information
 - `get_atlas_metrics()` — Entity and tag counts by type
 - `get_atlas_version()` — Atlas version
+- `diagnose_atlas_connectivity()` — Structured connectivity probes with curl commands and timeout diagnostics
 
 **Search**
 - `search_entities(query, type_name?, classification?, limit, offset, exclude_deleted)` — Basic search; use `'*'` to browse all
@@ -318,6 +319,67 @@ https://<cluster-host>/<topology>/cdp-proxy-api/atlas/api/atlas/
 ```
 
 A trailing slash is optional.
+
+## Troubleshooting Atlas timeouts
+
+When MCP tools fail with connection or read timeouts, run connectivity diagnostics before
+changing contract or typedef code.
+
+### Option 1: MCP tool
+
+Ask the agent to call `diagnose_atlas_connectivity()`. The response includes:
+
+- `overall`: `ok`, `warning`, `timeout`, or `failed`
+- `checks`: per-endpoint status, elapsed ms, HTTP code, and message
+- `curl_commands`: equivalent shell probes (credentials via `$ATLAS_USER` / `$ATLAS_PASS`)
+- `recommendations`: remediation hints (VPN, timeout, URL format, TLS, auth)
+
+### Option 2: curl script (outside MCP)
+
+```bash
+export ATLAS_GATEWAY_URL="https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/"
+export ATLAS_USER="your_user"
+export ATLAS_PASS="your_password"
+# optional for sandboxes: export ATLAS_VERIFY_SSL=false
+# optional: export HTTP_TIMEOUT_SECONDS=60
+
+chmod +x scripts/curl_atlas_diagnostics.sh
+./scripts/curl_atlas_diagnostics.sh
+```
+
+The script probes three endpoints:
+
+1. `{ATLAS_GATEWAY_URL}/admin/status` — Knox/Atlas health (no `/v2`)
+2. `{ATLAS_GATEWAY_URL}/admin/version` — version metadata
+3. `{ATLAS_GATEWAY_URL}/v2/search/basic?query=*&limit=1` — v2 API smoke test
+
+On **curl exit 28** (timeout) it prints diagnostics such as:
+
+- Knox/Atlas unreachable or blocked by firewall/VPN
+- Increase `HTTP_TIMEOUT_SECONDS`
+- Verify the gateway URL path ends with `.../cdp-proxy-api/atlas/api/atlas/`
+
+### Option 3: Python CLI
+
+```bash
+uv run python -m data_contract_mcp_server.diagnostics
+```
+
+Prints the same structured JSON report and exits non-zero on failure/timeout.
+
+### Manual single-endpoint curl
+
+```bash
+curl -sS -w "\nHTTP %{http_code} total %{time_total}s\n" \
+  --connect-timeout 10 -m "${HTTP_TIMEOUT_SECONDS:-30}" \
+  -u "$ATLAS_USER:$ATLAS_PASS" \
+  -H "Accept: application/json" \
+  "${ATLAS_GATEWAY_URL%/}/admin/status"
+```
+
+If this times out but Ranger or other CDP APIs work, Atlas/Knox may be down or the URL path
+may be wrong. A common mistake is a double `/v2/` segment — the gateway URL should **not**
+include `/v2`; the client adds it for v2 REST calls.
 
 ## Example Queries
 

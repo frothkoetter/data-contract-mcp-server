@@ -8,6 +8,7 @@ import anyio
 from .auth import AtlasAuthFactory
 from .client import AtlasClient
 from .config import ServerConfig
+from .diagnostics import diagnose_atlas_connectivity
 from .data_contracts import (
     parse_consumers,
     parse_enforcement_default_action,
@@ -78,6 +79,24 @@ def create_server(atlas: AtlasClient) -> FastMCP:
     async def get_atlas_version() -> Dict[str, Any]:
         """Get Apache Atlas version information."""
         return _redact(atlas.get_version())
+
+    @app.tool()
+    async def diagnose_atlas_connectivity() -> Dict[str, Any]:
+        """Run Atlas/Knox connectivity probes with structured timeout diagnostics.
+
+        Use when MCP Atlas calls time out or fail to connect. Probes admin/status,
+        admin/version, and a lightweight v2 search. Returns per-check status, elapsed
+        milliseconds, equivalent curl commands, and remediation recommendations.
+
+        For manual testing outside MCP, run: scripts/curl_atlas_diagnostics.sh
+        """
+        config = ServerConfig()
+        return _redact(
+            diagnose_atlas_connectivity(
+                config,
+                session=atlas.session,
+            )
+        )
 
     # ── Search ─────────────────────────────────────────────────────────────
 
