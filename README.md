@@ -336,6 +336,68 @@ https://<cluster-host>/<topology>/cdp-proxy-api/atlas/api/atlas/
 
 A trailing slash is optional.
 
+## Troubleshooting MCP server load failures
+
+If CrewAI Agent Studio, Cursor, or another MCP host fails to connect to this server via `uvx`,
+check the following.
+
+### `FastMCP` / `mcp` import error
+
+`uvx` installs the latest `mcp` package (currently 2.x). MCP Python SDK 2.0 renamed `FastMCP` to
+`MCPServer`. Older server builds crash on startup with:
+
+```
+ImportError: cannot import name 'FastMCP' from 'mcp.server'
+```
+
+Use a server build that includes the dual-import fix (MCPServer + FastMCP fallback), or pin
+`mcp>=1.28,<2` in your environment.
+
+Verify locally:
+
+```bash
+ATLAS_GATEWAY_URL="https://example.com/atlas/" \
+ATLAS_USER="test" ATLAS_PASS="test" \
+uv run python scripts/test_mcp_stdio.py uvx --from . run-server
+```
+
+Expected output: `OK initialize` and `OK tools/list: 36 tools`.
+
+### Missing Atlas credentials at startup
+
+The server requires `ATLAS_GATEWAY_URL`, `ATLAS_USER`, and `ATLAS_PASS` in the MCP host's `env`
+block. If any are missing, startup fails before the MCP handshake:
+
+```
+ValueError: ATLAS_USER and ATLAS_PASS must be set.
+```
+
+### Agent Studio / CrewAI config
+
+Recommended MCP config (stdio transport is the default for `run-server`):
+
+```json
+{
+  "mcpServers": {
+    "data-contract-mcp-server": {
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/frothkoetter/data-contract-mcp-server.git@main",
+        "run-server"
+      ],
+      "env": {
+        "ATLAS_GATEWAY_URL": "https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/",
+        "ATLAS_USER": "<username>",
+        "ATLAS_PASS": "<password>"
+      }
+    }
+  }
+}
+```
+
+Ensure `uvx` is on the Agent Studio host PATH (`which uvx`).
+
 ## Troubleshooting Atlas timeouts
 
 When MCP tools fail with connection or read timeouts, run connectivity diagnostics before

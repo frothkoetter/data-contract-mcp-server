@@ -23,9 +23,11 @@ from .data_contracts import (
 )
 
 try:
-    from mcp.server import FastMCP
+    from mcp.server import MCPServer as MCPApp
+except ImportError:
+    from mcp.server import FastMCP as MCPApp  # type: ignore[attr-defined,no-redef]
 except Exception as e:
-    raise RuntimeError("The 'mcp' package is required. Install with: pip install mcp") from e
+    raise RuntimeError("The 'mcp' package is required. Install with: pip install 'mcp>=1.28'") from e
 
 
 def _redact(obj: Any, max_items: int = 200) -> Any:
@@ -60,8 +62,8 @@ def build_client(config: ServerConfig) -> AtlasClient:
     )
 
 
-def create_server(atlas: AtlasClient) -> FastMCP:
-    app = FastMCP("data-contract-mcp-server")
+def create_server(atlas: AtlasClient) -> MCPApp:
+    app = MCPApp("data-contract-mcp-server")
 
     # ── Admin / Status ─────────────────────────────────────────────────────
 

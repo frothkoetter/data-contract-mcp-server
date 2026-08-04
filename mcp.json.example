@@ -1,10 +1,13 @@
 {
   "mcpServers": {
     "data-contract-mcp-server": {
-      "command": "/FULL/PATH/TO/data-contract-mcp-server/.venv/bin/python",
-      "args": ["-m", "data_contract_mcp_server.server"],
+      "command": "uvx",
+      "args": [
+        "--from",
+        "git+https://github.com/frothkoetter/data-contract-mcp-server.git@main",
+        "run-server"
+      ],
       "env": {
-        "MCP_TRANSPORT": "stdio",
         "ATLAS_GATEWAY_URL": "https://<host>/<topology>/cdp-proxy-api/atlas/api/atlas/",
         "ATLAS_USER": "<your_username>",
         "ATLAS_PASS": "<your_password>"
