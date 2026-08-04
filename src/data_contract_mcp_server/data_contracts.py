@@ -67,6 +67,8 @@ _ODCS_KEY_ALIASES: Dict[str, str] = {
     "enforcementMode": "enforcement_mode",
     "enforcementDefaultAction": "enforcement_default_action",
     "autoMarkBrokenOnCritical": "auto_mark_broken_on_critical",
+    "dslType": "dsl_type",
+    "dqType": "dq_type",
 }
 
 _DATA_CONTRACT_PRESERVED_ATTRS = (
@@ -146,8 +148,8 @@ DATA_CONTRACT_STRUCT_DEFS = [
     },
     {
         "name": STRUCT_QUALITY_RULE,
-        "description": "ODCS data quality rule",
-        "typeVersion": "1.1",
+        "description": "ODCS data quality rule (Apache Griffin DSL compatible)",
+        "typeVersion": "1.2",
         "attributeDefs": [
             _optional_attr("rule_type", "string"),
             _optional_attr("metric", "string"),
@@ -158,6 +160,9 @@ DATA_CONTRACT_STRUCT_DEFS = [
             _optional_attr("element", "string"),
             _optional_attr("query", "string"),
             _optional_attr("engine", "string"),
+            _optional_attr("dsl_type", "string"),
+            _optional_attr("dq_type", "string"),
+            _optional_attr("rule", "string"),
             _optional_attr("severity", "string"),
             _optional_attr("business_impact", "string"),
             _optional_attr("enforcement_policy", "string"),
@@ -511,6 +516,8 @@ def parse_schema_objects(schema_objects: JsonArrayInput) -> List[Dict[str, Any]]
 
 
 def parse_struct_quality_rules(quality: JsonArrayInput) -> List[Dict[str, Any]]:
+    from data_contract_mcp_server.griffin import normalize_griffin_quality_rule
+
     items = coerce_json_array(quality, "quality")
     result: List[Dict[str, Any]] = []
     for item in items:
@@ -519,6 +526,7 @@ def parse_struct_quality_rules(quality: JsonArrayInput) -> List[Dict[str, Any]]:
         normalized = _normalize_mapping(item)
         if "threshold" in normalized and normalized["threshold"] is not None:
             normalized["threshold"] = str(normalized["threshold"])
+        normalized = normalize_griffin_quality_rule(normalized)
         result.append(normalized)
     return result
 

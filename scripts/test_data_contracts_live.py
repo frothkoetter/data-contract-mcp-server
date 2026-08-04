@@ -101,8 +101,12 @@ def main() -> int:
     ]
     quality = [
         {
-            "rule_type": "library",
+            "rule_type": "timeliness",
             "metric": "freshness",
+            "engine": "griffin",
+            "dsl_type": "griffin-dsl",
+            "dq_type": "timeliness",
+            "rule": "updated_at",
             "threshold": "24",
             "unit": "h",
             "element": "orders.updated_at",

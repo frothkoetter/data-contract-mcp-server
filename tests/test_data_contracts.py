@@ -94,10 +94,10 @@ def test_parse_struct_quality_rules_odcs_column_completeness() -> None:
                 "description": "Ensure reporting_bank_bic is not null for all records.",
                 "rule_type": "completeness",
                 "metric": "not_null_count",
-                "query": (
-                    "SELECT COUNT(*) FROM mart_portfolio_risk_summary "
-                    "WHERE reporting_bank_bic IS NULL"
-                ),
+                "engine": "griffin",
+                "dsl_type": "griffin-dsl",
+                "dq_type": "completeness",
+                "rule": "reporting_bank_bic",
                 "threshold": 0,
                 "severity": "critical",
                 "enforcement_policy": "block_access_on_violation",
@@ -112,6 +112,10 @@ def test_parse_struct_quality_rules_odcs_column_completeness() -> None:
     assert rule["name"] == "DQ_NOT_NULL_reporting_bank_bic"
     assert rule["rule_type"] == "completeness"
     assert rule["metric"] == "not_null_count"
+    assert rule["engine"] == "griffin"
+    assert rule["dsl_type"] == "griffin-dsl"
+    assert rule["dq_type"] == "completeness"
+    assert rule["rule"] == "reporting_bank_bic"
     assert rule["threshold"] == "0"
     assert rule["element"] == "reporting_bank_bic"
     assert rule["enforcement_policy"] == "block_access_on_violation"

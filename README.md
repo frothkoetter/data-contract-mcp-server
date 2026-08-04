@@ -75,7 +75,7 @@ Atlas entity type `data_contract` (Hybrid v2.3) stores ODCS contract metadata al
 | `description_purpose`, `description_limitations` | Usage context |
 | `tags`, `consumer` | Labels and consumers (roles, groups, persons) |
 | `quality_rules` | Legacy plain-text rules |
-| `quality` | Structured ODCS quality rules (`metric`, `threshold`, `severity`, `enforcement_policy`, …) |
+| `quality` | Structured ODCS quality rules (`metric`, `threshold`, `severity`, `enforcement_policy`, Griffin DSL fields `engine`, `dsl_type`, `dq_type`, `rule`, …) |
 | `sla_properties` | SLA properties (freshness, frequency, …) |
 | `schema_objects`, `schema_properties` | Schema with flattened columns for Atlas |
 | `enforcement_policies` | Violation handling policies (alert, block, quarantine, escalate, …) |
@@ -140,6 +140,11 @@ Structured array fields (`schema_objects`, `quality`, `sla_properties`, `quality
   }],
   "quality": [{
     "metric": "freshness",
+    "rule_type": "timeliness",
+    "engine": "griffin",
+    "dsl_type": "griffin-dsl",
+    "dq_type": "timeliness",
+    "rule": "updated_at",
     "threshold": "24",
     "unit": "h",
     "element": "orders.updated_at",
@@ -160,9 +165,12 @@ Structured array fields (`schema_objects`, `quality`, `sla_properties`, `quality
 }
 ```
 
-### Example: ODCS column completeness check
+### Example: ODCS column completeness check (Apache Griffin DSL)
 
-Pass column-level rules in the **`quality`** array (not `quality_rules`). Link enforcement via
+Pass column-level rules in the **`quality`** array (not `quality_rules`). Rules are stored in
+[Apache Griffin DSL](https://github.com/apache/griffin/blob/master/griffin-doc/measure/dsl-guide.md)
+format with `engine`, `dsl_type`, `dq_type`, and `rule` fields. When `engine` is omitted, Griffin
+DSL fields are inferred from `rule_type`, `metric`, and `element`. Link enforcement via
 `enforcement_policy` (rule reference) and a matching entry in `enforcement_policies`:
 
 ```json
@@ -185,7 +193,10 @@ Pass column-level rules in the **`quality`** array (not `quality_rules`). Link e
     "description": "Ensure reporting_bank_bic is not null for all records.",
     "rule_type": "completeness",
     "metric": "not_null_count",
-    "query": "SELECT COUNT(*) FROM mart_portfolio_risk_summary WHERE reporting_bank_bic IS NULL",
+    "engine": "griffin",
+    "dsl_type": "griffin-dsl",
+    "dq_type": "completeness",
+    "rule": "reporting_bank_bic",
     "threshold": 0,
     "severity": "critical",
     "enforcement_policy": "block_access_on_violation",
@@ -202,7 +213,12 @@ Pass column-level rules in the **`quality`** array (not `quality_rules`). Link e
 }
 ```
 
-CamelCase ODCS keys (`ruleType`, `businessImpact`, `enforcementPolicy`) are also accepted.
+Griffin DSL rule types (`dq_type`) include `completeness`, `timeliness`, `uniqueness`,
+`distinctness`, `accuracy`, and `profiling`. The `rule` field holds the Griffin DSL expression
+(e.g. column list for completeness, timestamp column for timeliness, profiling aggregations).
+
+CamelCase ODCS keys (`ruleType`, `businessImpact`, `enforcementPolicy`, `dslType`, `dqType`) are
+also accepted.
 
 ### Enforcement policy actions
 
